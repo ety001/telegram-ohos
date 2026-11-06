@@ -1,11 +1,9 @@
 {
-  // 对应 API 26 工具链（DevEco Studio 26 / hvigor 6.26.x）的开发态配置版本
+  // modelVersion 为 DevEco Studio 26 配套的开发态版本号（与 hvigor 工具版本是两个概念）
   "modelVersion": "26.0.0",
   "dependencies": {},
   "execution": {
-    "daemon": true,
-    "parallel": true,
-    "incremental": true
+    "daemon": true
   },
   "logging": {
     "level": "info"

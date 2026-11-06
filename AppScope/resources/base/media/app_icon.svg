@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="216" height="216" viewBox="0 0 216 216">
-  <!-- 占位应用图标：深蓝底 + 白色纸飞机剪影，后续替换正式图标 -->
-  <rect x="0" y="0" width="216" height="216" rx="48" ry="48" fill="#3390EC"/>
-  <path d="M62 62 L174 108 L62 154 L84 108 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round"/>
-</svg>
