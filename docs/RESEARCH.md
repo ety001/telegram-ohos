@@ -68,9 +68,9 @@ HarmonyOS 5.0=API12 → 6.0=API20 → 6.1=API23 → **7.0=API26**（2026-08 正�
 - Telegram 官方鸿蒙客户端（不存在，无官方计划）
 - 手机端"无限保活"（一致性校验 + 冻结机制封死）——本项目不涉及
 
-## 三、重点参考项目深评：TelegramHarmony
+## 三、已评估项目：TelegramHarmony（2026-04 评估后弃用参考）
 
-> 结论：**UI 分层设计值得参考，代码不可复用（无 LICENSE），协议层路线不采纳。** 本项目维持 TDLib 路线。
+> 结论：**不作为参考，UI 完全自研。** 理由：无 LICENSE、协议层自曝 CRITICAL 缺陷、项目已停滞。本节保留调研证据备查。
 
 ### 基本盘（2026-04 实测）
 
@@ -85,15 +85,11 @@ HarmonyOS 5.0=API12 → 6.0=API20 → 6.1=API23 → **7.0=API26**（2026-08 正�
 | 活跃度 | 单次 Initial commit（2026-01-23），此后零推送，疑似停滞 | GitHub API pushed_at |
 | 星标 | 47 stars / 8 forks | GitHub API |
 
-### 对本项目的三条启示
+### 评估后的决策（2026-04）
 
-1. **协议层：TDLib 路线更坚定。** 它踩的坑（access_hash 管理、指数退避重试、媒体上传、DC 切换）恰好全是 TDLib 开箱即解决的问题。自写 MTProto 的长期维护成本（Telegram layer 升级要自己跟）远超收益。
-2. **UI 层：抄设计不抄代码。** 其页面划分（LoginPage/VerifyCodePage/ChatListPage/ChatPage）、ViewModel 分层、组件拆分（Avatar/MessageBubble/ReplyPreview）可作为交互与结构蓝本；落地到 API 26 + PC-only 需重写。
-3. **文档红利可吸收**：docs/ARKTS_BEST_PRACTICES.md（ArkTS 严格子集坑清单：no-any、显式返回类型、no-in 等）质量不错，开发期对照。
-
-### 获取方式
-
-参考库已 clone 至本机 `~/workspace/TelegramHarmony`（--depth 1），仅供设计对照，任何代码/文本不复制进本仓库。
+1. **协议层：维持 TDLib 路线。** 其踩的坑（access_hash 管理、指数退避重试、媒体上传、DC 切换）恰好全是 TDLib 开箱即解决的问题；自写 MTProto 的长期维护成本（Telegram layer 升级要自己跟）远超收益。
+2. **UI：不参考其设计，完全自研。** 自研桌面三栏信息架构见 PLAN.md §4（导航条/会话列表/聊天区 + PC 特性）。
+3. 本地参考库 clone 已清理，不再保留。
 
 ## 四、同类项目速览（供 UI/交互参考）
 
