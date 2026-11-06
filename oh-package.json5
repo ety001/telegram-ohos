@@ -1,0 +1,6 @@
+{
+  "modelVersion": "26.0.0",
+  "description": "telegram-ohos：鸿蒙 PC 原生 Telegram 客户端（个人自用工程根包）",
+  "dependencies": {},
+  "devDependencies": {}
+}
