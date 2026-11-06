@@ -68,6 +68,33 @@ HarmonyOS 5.0=API12 → 6.0=API20 → 6.1=API23 → **7.0=API26**（2026-08 正�
 - Telegram 官方鸿蒙客户端（不存在，无官方计划）
 - 手机端"无限保活"（一致性校验 + 冻结机制封死）——本项目不涉及
 
-## 三、同类项目速览（供 UI/交互参考）
+## 三、重点参考项目深评：TelegramHarmony
 
-- [Gramony](https://github.com/Gramony/Gramony)、[TelegramHarmony](https://github.com/ForestBook/TelegramHarmony)、[Homogram](https://github.com/HomoArk/Homogram)（Rust grammers 路线）、[Web-Telegram-for-OpenHarmony](https://github.com/XHXYT/Web-Telegram-for-OpenHarmony)（Web 封装路线，非本项目路线）
+> 结论：**UI 分层设计值得参考，代码不可复用（无 LICENSE），协议层路线不采纳。** 本项目维持 TDLib 路线。
+
+### 基本盘（2026-04 实测）
+
+| 维度 | 事实 | 来源 |
+|---|---|---|
+| 技术路线 | 纯 ArkTS 手写 MTProto 2.0（Layer 214），**无 TDLib、零第三方依赖**、无原生代码 | README + 代码结构 |
+| 规模 | 协议层 ≈13K 行（AES-IGE/AuthKey/TL 序列化/传输）+ UI 层 ≈25K 行 | wc -l 实测 |
+| API 版本 | compatible 5.0.0(12) / target 6.0.2(22) | build-profile.json5 |
+| 完成度 | 自评 72%，但**水分明显**：文本/图片/语音发送均标注 "✅ Mock" | docs/FEATURE_PROGRESS.md |
+| 已知缺陷 | 自曝 CRITICAL：accessHash 回退 0 致发送失败；无请求重试；媒体发送是占位符（返回假消息，未实际上传） | docs/MESSAGE_FLOW_ISSUES.md |
+| 许可证 | **GitHub license: null**（无 LICENSE 文件）→ 默认保留所有权利，**不可复制代码** | GitHub API |
+| 活跃度 | 单次 Initial commit（2026-01-23），此后零推送，疑似停滞 | GitHub API pushed_at |
+| 星标 | 47 stars / 8 forks | GitHub API |
+
+### 对本项目的三条启示
+
+1. **协议层：TDLib 路线更坚定。** 它踩的坑（access_hash 管理、指数退避重试、媒体上传、DC 切换）恰好全是 TDLib 开箱即解决的问题。自写 MTProto 的长期维护成本（Telegram layer 升级要自己跟）远超收益。
+2. **UI 层：抄设计不抄代码。** 其页面划分（LoginPage/VerifyCodePage/ChatListPage/ChatPage）、ViewModel 分层、组件拆分（Avatar/MessageBubble/ReplyPreview）可作为交互与结构蓝本；落地到 API 26 + PC-only 需重写。
+3. **文档红利可吸收**：docs/ARKTS_BEST_PRACTICES.md（ArkTS 严格子集坑清单：no-any、显式返回类型、no-in 等）质量不错，开发期对照。
+
+### 获取方式
+
+参考库已 clone 至本机 `~/workspace/TelegramHarmony`（--depth 1），仅供设计对照，任何代码/文本不复制进本仓库。
+
+## 四、同类项目速览（供 UI/交互参考）
+
+- [Gramony](https://github.com/Gramony/Gramony)、[Homogram](https://github.com/HomoArk/Homogram)（Rust grammers 路线）、[Web-Telegram-for-OpenHarmony](https://github.com/XHXYT/Web-Telegram-for-OpenHarmony)（Web 封装路线，非本项目路线）

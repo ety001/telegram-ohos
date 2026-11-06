@@ -50,6 +50,7 @@ todos:
 | 目标设备 | **仅鸿蒙 PC（PC-only）** | 吃满生命周期红利：最小化不进后台；TASK_KEEPING 免 ACL |
 | MVP 范围 | **精简版** | 文本收发 + 图片/视频/文件 + 本地通知；贴纸/语音/通话留二期 |
 | TDLib 二进制 | **两步走** | 先社区脚本快速起步，后接入自有流水线固化（openssl/zlib 仓库内已有） |
+| UI 参考基准 | **TelegramHarmony 的分层设计**（页面/ViewModel/组件），代码零复用 | 其无 LICENSE 不可复制；且其协议层自曝 CRITICAL 缺陷（accessHash/重试/媒体上传），反证 TDLib 路线 |
 
 ## 3. 调研结论依据（详见 docs/RESEARCH.md）
 
