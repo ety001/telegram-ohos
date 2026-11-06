@@ -1,0 +1,22 @@
+# DevEco / hvigor
+build/
+.cxx/
+.hvigor/
+oh_modules/
+local.properties
+.idea/
+
+# 签名与本地材料（脱敏硬规则，永不入库）
+local/
+*.cer
+*.p7b
+*.p12
+*.keystore
+
+# 构建产物
+*.hap
+*.hsp
+*.so.tmp
+
+# 系统
+.DS_Store
