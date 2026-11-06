@@ -1,0 +1,14 @@
+{
+  // modelVersion 为 DevEco Studio 26 配套的开发态版本号（与 hvigor 工具版本是两个概念）
+  "modelVersion": "26.0.0",
+  "dependencies": {},
+  "execution": {
+    "daemon": true
+  },
+  "logging": {
+    "level": "info"
+  },
+  "nodeOptions": {
+    "maxOldSpaceSize": 8192
+  }
+}

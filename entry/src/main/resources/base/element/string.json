@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "telegram-ohos 主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "telegram-ohos 主能力入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "telegram-ohos"
+    },
+    {
+      "name": "chat_list_empty",
+      "value": "暂无会话"
+    },
+    {
+      "name": "chat_area_placeholder",
+      "value": "选择一个会话开始聊天"
+    },
+    {
+      "name": "search_placeholder",
+      "value": "搜索"
+    }
+  ]
+}
