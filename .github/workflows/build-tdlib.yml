@@ -1,0 +1,199 @@
+# TDLib (libtdjson.so) CI 编译流水线
+# 方案与骨架：docs/CI-RESEARCH.md §三；落地状态与骨架差异：§七
+#
+# 触发：手动 workflow_dispatch（可输入 sdk_version，默认 7.0）或 push tag tdlib-v*
+# 回库：产物以 github-actions[bot] 身份 commit 到 main（仅 main 分支触发的构建回库，
+#       见回库步分支护栏），[skip ci] 防递归触发
+name: build-tdlib
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_version:
+        description: "OHOS SDK 大版本（repo.huaweicloud.com os/<ver>-Release，仅 x.y 形式，如 7.0/6.0）"
+        required: false
+        default: "7.0"
+  push:
+    tags:
+      - "tdlib-v*"
+
+# group 带 ref：手动 dispatch 不会误杀进行中的 tag 构建（不同 ref 互不取消）
+concurrency:
+  group: build-tdlib-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write          # 产物回库（bot commit + push）需要
+
+jobs:
+  build:
+    runs-on: ubuntu-latest          # 未来可换 [self-hosted, linux, x64]
+    timeout-minutes: 120            # 首跑无缓存：SDK 下载解压 + openssl/zlib 交叉构建 + TDLib 全量
+    env:
+      # dispatch 输入优先；tag 触发无输入时回落默认 7.0
+      OHOS_SDK_VER: ${{ github.event_name == 'workflow_dispatch' && inputs.sdk_version || '7.0' }}
+      OHOS_SDK_HOME: ${{ github.workspace }}/ohos-sdk/linux
+      OHOS_DEPS_HOME: ${{ github.workspace }}/ohos-deps
+      ZLIB_VERSION: "1.3.1"
+      # zlib 上游无 .sha256 伴生文件（zlib.net 实测 404，GitHub release 资产亦无），
+      # 此为官方 release 资产实测哈希；升级 ZLIB_VERSION 时须同步重算
+      ZLIB_SHA256: "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32"
+      OPENSSL_VERSION: "3.5.9"      # 3.5 LTS 线最新安全补丁版（修多项 CVE，最高 High；3.4/3.6 已 EOL）
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0（v6 浮动 tag 当前指向）
+
+      - name: 校验 sdk_version 输入格式（fail-fast）
+        run: |
+          if ! printf '%s' "$OHOS_SDK_VER" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error::sdk_version「$OHOS_SDK_VER」格式非法：仅支持 x.y 形式（如 7.0、6.0），对应 repo.huaweicloud.com/openharmony/os/<x.y>-Release 目录"
+            exit 1
+          fi
+
+      - name: 释放磁盘（runner 可用仅 ~14GB，SDK 3.2GiB 压缩包 + 解压需要腾空间）
+        uses: endersonmenezes/free-disk-space@7901478139cff6e9d44df5972fd8ab8fcade4db1 # v3
+
+      - name: 安装 host 工具链
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang gperf ninja-build ccache unzip
+
+      - name: ccache（5G）
+        uses: hendrikmuhs/ccache-action@5ebbd400eff9e74630f759d94ddd7b6c26299639 # v1.2
+        with:
+          max-size: "5G"
+
+      - name: 缓存解压后 OHOS SDK
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0（v4 浮动 tag 当前指向）
+        id: sdk
+        with:
+          path: ${{ env.OHOS_SDK_HOME }}
+          key: ohos-sdk-${{ env.OHOS_SDK_VER }}
+
+      - name: 下载并解压 OHOS SDK（仅保留 linux/native 组件）
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          SDK_URL="https://repo.huaweicloud.com/openharmony/os/${OHOS_SDK_VER}-Release/ohos-sdk-windows_linux-public.tar.gz"
+          curl -fOL "$SDK_URL"
+          # 伴生 .sha256（7.0-Release 目录实测存在，65B 纯哈希、无文件名）：有即校验，无则仅告警（个别版本目录可能缺伴生文件）
+          if curl -fsSL -o sdk.tar.gz.sha256 "${SDK_URL}.sha256"; then
+            expected="$(tr -d '[:space:]' < sdk.tar.gz.sha256)"
+            actual="$(sha256sum ohos-sdk-windows_linux-public.tar.gz | cut -d' ' -f1)"
+            if [ "$expected" != "$actual" ]; then
+              echo "::error::SDK sha256 校验失败：期望 $expected，实得 $actual（$SDK_URL）"
+              exit 1
+            fi
+            echo "SDK sha256 校验通过: $actual"
+          else
+            echo "::warning::${OHOS_SDK_VER}-Release 无伴生 .sha256 文件，跳过 SDK 下载校验"
+          fi
+          tar -xzf ohos-sdk-*.tar.gz
+          rm -f ohos-sdk-*.tar.gz sdk.tar.gz.sha256
+          rm -rf ohos-sdk/ohos ohos-sdk/windows
+          # 只解压 native（TDLib 交叉编译唯一需要），其余 zip 直接删，磁盘与缓存减半
+          (cd ohos-sdk/linux \
+            && unzip -q native-linux-x64-*.zip \
+            && rm -f ./*.zip)
+
+      # 缓存完整性护栏：cache 命中不再走上面的下载步，坏缓存若不在此拦截会拖到编译中后期才炸
+      - name: SDK 完整性校验（cache 命中也需要）
+        run: |
+          test -x "$OHOS_SDK_HOME/native/llvm/bin/clang" || {
+            echo "::error::SDK 缓存不完整（缺 native/llvm/bin/clang）——清缓存后重跑：gh cache delete ohos-sdk-${OHOS_SDK_VER}（或 Actions 页 → Caches 删除）"
+            exit 1
+          }
+
+      - name: 缓存 aarch64-ohos 依赖（openssl/zlib 静态库）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0（v4 浮动 tag 当前指向）
+        id: deps
+        with:
+          path: ${{ env.OHOS_DEPS_HOME }}
+          # v2：openssl Configure 加 -fPIC -D__MUSL__=1（共享库静态链入必须 PIC），旧缓存失效属预期
+          key: ohos-deps-openssl${{ env.OPENSSL_VERSION }}-zlib${{ env.ZLIB_VERSION }}-${{ env.OHOS_SDK_VER }}-v2
+
+      # 骨架缺口的补全：SDK sysroot 无 openssl（zlib 亦只有动态库），本机靠 harmonybrew
+      # 静态库而 CI 没有——在此用 OHOS toolchain 交叉构建，经 --openssl-root/--zlib-root 传入
+      - name: 交叉构建 openssl/zlib（aarch64-linux-ohos 静态库）
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          NDK="$OHOS_SDK_HOME/native"
+          TC="$NDK/build/cmake/ohos.toolchain.cmake"
+          [ -f "$TC" ] || TC="$NDK/build-tools/cmake/ohos.toolchain.cmake"
+
+          # zlib：cmake + ohos toolchain（纯 C，静态库）；官方无 .sha256 侧车文件，用上方钉死的哈希校验
+          curl -fsSL -o "zlib-${ZLIB_VERSION}.tar.xz" \
+            "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.xz"
+          echo "${ZLIB_SHA256}  zlib-${ZLIB_VERSION}.tar.xz" | sha256sum -c -
+          tar -xJf "zlib-${ZLIB_VERSION}.tar.xz"
+          cmake -S "zlib-${ZLIB_VERSION}" -B zlib-build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$TC" \
+            -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_INSTALL_PREFIX="$OHOS_DEPS_HOME/zlib"
+          cmake --build zlib-build
+          cmake --install zlib-build
+          test -f "$OHOS_DEPS_HOME/zlib/lib/libz.a"
+
+          # openssl：linux-aarch64 目标 + NDK 自带 target wrapper clang（静态库，install_sw 只装库与头）
+          # 3.5.9 的 release 资产为 .tar.gz（非 .tar.xz），且附官方 .tar.gz.sha256（实测可达，sha256sum -c 直接可用）
+          curl -fsSL -o "openssl-${OPENSSL_VERSION}.tar.gz" \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          curl -fsSL -o "openssl-${OPENSSL_VERSION}.tar.gz.sha256" \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz.sha256"
+          sha256sum -c "openssl-${OPENSSL_VERSION}.tar.gz.sha256"
+          tar -xzf "openssl-${OPENSSL_VERSION}.tar.gz"
+          cd "openssl-${OPENSSL_VERSION}"
+          # -fPIC：libtdjson.so 是共享库，静态链入的非 PIC 归档会在链接期 relocation 报错；
+          # -D__MUSL__=1：对齐 OHOS musl libc 的头文件判定（对齐社区配方 ErBWs/tdlib-ohos-build）
+          CFLAGS="-fPIC -D__MUSL__=1" CXXFLAGS="-fPIC -D__MUSL__=1" \
+            ./Configure linux-aarch64 no-shared no-tests no-docs \
+            --prefix="$OHOS_DEPS_HOME/openssl" --openssldir=/etc/ssl \
+            CC="$NDK/llvm/bin/aarch64-unknown-linux-ohos-clang" \
+            CXX="$NDK/llvm/bin/aarch64-unknown-linux-ohos-clang++" \
+            AR="$NDK/llvm/bin/llvm-ar" \
+            RANLIB="$NDK/llvm/bin/llvm-ranlib"
+          make -j"$(nproc)"
+          make install_sw
+          test -f "$OHOS_DEPS_HOME/openssl/lib/libcrypto.a"
+          cd - > /dev/null
+          rm -rf "zlib-${ZLIB_VERSION}.tar.xz" "zlib-${ZLIB_VERSION}" zlib-build \
+            "openssl-${OPENSSL_VERSION}.tar.gz" "openssl-${OPENSSL_VERSION}.tar.gz.sha256" "openssl-${OPENSSL_VERSION}"
+
+      - name: 编译 libtdjson.so
+        run: |
+          ./scripts/build_tdlib.sh \
+            --sdk "$OHOS_SDK_HOME" \
+            --jobs "$(nproc)" \
+            --ccache \
+            --openssl-root "$OHOS_DEPS_HOME/openssl" \
+            --zlib-root "$OHOS_DEPS_HOME/zlib" \
+            --out out/
+
+      # 回库护栏：仅 main 分支触发的构建回库——防误从其它分支 dispatch 把未合并树推上 main；
+      # tag 触发（refs/tags/tdlib-v*）跳过回库，产物走下方 artifact 留档
+      - name: 产物回库（github-actions[bot]）
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cp out/libtdjson.so libs/arm64-v8a/libtdjson.so
+          cp out/SHA256SUMS libs/arm64-v8a/SHA256SUMS
+          git config user.name "github-actions[bot]"
+          git config user.email "41898602+github-actions[bot]@users.noreply.github.com"
+          git add libs/arm64-v8a
+          if git diff --staged --quiet; then
+            echo "产物与库内一致，无需回库"
+            exit 0
+          fi
+          git commit -m "chore(tdlib): 重编 libtdjson.so [skip ci]"
+          # 固定回 main：push 目标写死 HEAD:main，非 FF 会被服务端拒绝（护栏兜底，属预期失败）
+          git push origin HEAD:main
+
+      # !cancelled()：回库失败/被护栏跳过时，产物仍留档可手动取回
+      - name: 产物留档（7 天）
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2（v4 浮动 tag 当前指向）
+        with:
+          name: libtdjson-ohos
+          path: out/
+          retention-days: 7

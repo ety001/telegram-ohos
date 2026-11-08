@@ -6,9 +6,13 @@
 #   阶段1 host  ：prepare_cross_compiling 生成 TL 源码（需要 gperf + host clang）
 #   阶段2 cross ：OHOS NDK toolchain 编译 tdjson（openssl/zlib 静态链入）
 #
-# 依赖（默认按 harmonybrew 前缀自动发现，也可用参数覆盖；详见 -h）：
-#   - OHOS NDK（llvm/bin/clang、build/cmake/ohos.toolchain.cmake、build-tools/cmake/bin/{cmake,ninja}）
-#   - host 侧 clang/clang++/gperf、python3（产物路径清洗兜底）
+# 依赖（三端可用：鸿蒙 PC / GitHub Actions / 其它 x64 Linux；详见 -h）：
+#   - OHOS SDK：--sdk <含 native/ 的目录> 或环境变量 OHOS_NDK_HOME（显式唯一入口）；
+#     未指定时回落鸿蒙 PC 本机兜底（harmonybrew Cellar 自动发现，ohos-sdk-native 本身即 native/ 目录）
+#   - NDK 内 toolchain 文件双路径探测（位置随 SDK 版本变化）：
+#     native/build/cmake/ 与 native/build-tools/cmake/ 下的 ohos.toolchain.cmake
+#   - cmake/ninja：优先 SDK 内置（build-tools/cmake/bin），缺失回落 PATH（CI 由 apt 提供）
+#   - host 侧 clang/clang++/gperf：优先 harmonybrew，前缀不存在时回落 PATH（CI 由 apt 提供）
 #   - openssl（静态库 libcrypto.a/libssl.a，arm64-ohos 目标）
 #   - zlib（静态库 libz.a，arm64-ohos 目标）
 
@@ -19,15 +23,16 @@ TD_VERSION_DEFAULT="1.8.63"
 TD_COMMIT_DEFAULT="f06b0bac65278b03d26414c096080e7bfecfef52"  # "Update version to 1.8.63"
 BREW_PREFIX_DEFAULT="$HOME/.harmonybrew"
 WORKDIR_DEFAULT="$HOME/DevEco"              # 下含 td-src/（源码）与 build/（两个构建目录），均在仓库外
-JOBS_DEFAULT=1                              # 内存紧张时保守起步
+JOBS_DEFAULT="$(nproc 2>/dev/null || echo 1)"  # 默认取核数；可用内存 < 2G 时由 clamp_jobs 自动压回 1
 
 # ----------------------------- 仓库定位（脚本可从任意 cwd 调用） -----------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-OUT_DIR="$REPO_ROOT/libs/arm64-v8a"
+OUT_DIR="$REPO_ROOT/libs/arm64-v8a"            # 产物目录（--out 可覆盖为 CI staging 目录）
 
 # ----------------------------- 参数解析 -----------------------------
-NDK_ROOT=""
+SDK_ROOT=""                                 # --sdk / OHOS_NDK_HOME：指向含 native/ 的 SDK 根目录
+NDK_ROOT=""                                 # --ndk（兼容旧参）：直接指 native/ 目录；--sdk 优先
 TD_VERSION="$TD_VERSION_DEFAULT"
 TD_COMMIT="$TD_COMMIT_DEFAULT"
 BREW_PREFIX="$BREW_PREFIX_DEFAULT"
@@ -35,10 +40,13 @@ WORKDIR="$WORKDIR_DEFAULT"
 JOBS="$JOBS_DEFAULT"
 OPENSSL_ROOT=""
 ZLIB_ROOT=""
+USE_CCACHE=0
+CLEAN=0
 
 usage() {
   cat <<USAGE
 用法：scripts/build_tdlib.sh [选项]
+      scripts/build_tdlib.sh --clean [--workdir PATH]   # 只清理，不编译
 
 TDLib (tdjson) 交叉编译脚本 —— 目标 aarch64-linux-ohos (arm64-v8a)
 
@@ -46,18 +54,27 @@ TDLib (tdjson) 交叉编译脚本 —— 目标 aarch64-linux-ohos (arm64-v8a)
   阶段1 host  ：prepare_cross_compiling 生成 TL 源码（需要 gperf + host clang）
   阶段2 cross ：OHOS NDK toolchain 编译 tdjson（openssl/zlib 静态链入）
 
+SDK 入口（优先级从高到低）：
+  --sdk PATH           OHOS SDK 根目录（内含 native/）；等价环境变量 OHOS_NDK_HOME。
+                       显式传入时完全以传入为准（CI/跨端唯一入口）；本机不传则回落
+                       harmonybrew Cellar 自动发现（ohos-sdk-native 本身即 native/ 目录）
+  --ndk PATH           （兼容旧参）直接指 native/ 目录本身，优先级低于 --sdk/OHOS_NDK_HOME
+
 选项：
-  --jobs N, -j N       并行度（默认 1；可用内存 < 2G 时自动降为 1）
-  --ndk PATH           OHOS NDK 根目录（默认按 harmonybrew Cellar 自动发现）
+  --jobs N, -j N       并行度（默认 nproc；可用内存 < 2G 时自动降为 1）
+  --ccache             启用 ccache（注入 CMAKE_C(XX)_COMPILER_LAUNCHER=ccache；PATH 内无 ccache 时报错）
+  --out DIR            产物（libtdjson.so + SHA256SUMS）输出目录（默认 <repo>/libs/arm64-v8a/）；
+                       strip/泄漏门禁/unstripped 副本流程不受影响（unstripped 仍在构建目录）
+  --clean              子命令：删除 <workdir>/build/ 下两个构建目录与 TL 生成 stamp 后退出
   --td-version X.Y.Z   TDLib 版本号，须与源码 CMakeLists 的 project VERSION 一致
   --td-commit SHA      TDLib 上游 commit（默认 $TD_COMMIT_DEFAULT，见脚本顶部同名变量）
-  --brew-prefix PATH   harmonybrew 前缀（默认 ~/.harmonybrew）
+  --brew-prefix PATH   harmonybrew 前缀（默认 ~/.harmonybrew；不存在时 host 工具回落 PATH 发现）
   --workdir PATH       构建工作目录（默认 ~/DevEco，下含 td-src/ 与 build/）
   --openssl-root PATH  openssl 根目录（含 lib/libcrypto.a、lib/libssl.a，aarch64-ohos）
   --zlib-root PATH     zlib 根目录（含 lib/libz.a，aarch64-ohos）
   -h, --help           显示本帮助
 
-产物：libs/arm64-v8a/libtdjson.so（已 strip）+ libs/arm64-v8a/SHA256SUMS（脚本生成）
+产物：--out 指定目录（默认 <repo>/libs/arm64-v8a/）下 libtdjson.so（已 strip）+ SHA256SUMS（脚本生成）
       unstripped 原件保留在 <workdir>/build/td-ohos-arm64/（不入库），供崩溃符号化
 USAGE
   exit 1
@@ -65,6 +82,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --sdk)          SDK_ROOT="$2"; shift 2 ;;
     --ndk)          NDK_ROOT="$2"; shift 2 ;;
     --td-version)   TD_VERSION="$2"; shift 2 ;;
     --td-commit)    TD_COMMIT="$2"; shift 2 ;;
@@ -73,6 +91,9 @@ while [[ $# -gt 0 ]]; do
     --jobs|-j)      JOBS="$2"; shift 2 ;;
     --openssl-root) OPENSSL_ROOT="$2"; shift 2 ;;
     --zlib-root)    ZLIB_ROOT="$2"; shift 2 ;;
+    --out)          OUT_DIR="$2"; shift 2 ;;
+    --ccache)       USE_CCACHE=1; shift ;;
+    --clean)        CLEAN=1; shift ;;
     -h|--help)      usage ;;
     *) echo "未知参数: $1" >&2; usage ;;
   esac
@@ -80,6 +101,37 @@ done
 
 log()  { printf '\033[1;32m[build_tdlib]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[build_tdlib][FATAL]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# ----------------------------- 路径推导（--clean 也依赖，先于依赖发现） -----------------------------
+TD_SRC="$WORKDIR/td-src"
+HOST_BUILD="$WORKDIR/build/td-host"
+CROSS_BUILD="$WORKDIR/build/td-ohos-arm64"
+# auto/ 生成物陷阱：td/generate/auto/ 被 td 仓库 .gitignore 忽略，checkout -f 不会清理它；
+# 版本切换后残留的旧 TL 生成物会被交叉阶段照常编译（编出旧协议）。
+# 对策：auto/ 内记录 stamp（内容=TD_COMMIT），执行时比对——不一致则整目录删除并强制重生成。
+AUTO_DIR="$TD_SRC/td/generate/auto"
+AUTO_STAMP="$AUTO_DIR/.td-commit-stamp"
+
+# ----------------------------- --clean 子命令（不编译，提前退出） -----------------------------
+do_clean() {
+  log "清理构建目录: $HOST_BUILD"
+  rm -rf "$HOST_BUILD"
+  log "清理构建目录: $CROSS_BUILD"
+  rm -rf "$CROSS_BUILD"
+  if [[ -e "$AUTO_STAMP" ]]; then
+    rm -f "$AUTO_STAMP"
+    log "已删除 TL 生成 stamp（$AUTO_STAMP），下次构建将强制重生成 auto/"
+  else
+    log "无 TL 生成 stamp（$AUTO_STAMP），跳过"
+  fi
+  log "清理完成（TDLib 源码 $TD_SRC 保留，如需彻底重来请手工删除）"
+}
+if [[ "$CLEAN" == "1" ]]; then
+  do_clean
+  exit 0
+fi
+
+mkdir -p "$WORKDIR"
 
 # ----------------------------- 依赖自动发现 -----------------------------
 # 发现唯一匹配的 Cellar 目录；多个版本时取最新
@@ -90,23 +142,72 @@ cellar_latest() {  # $1=Formula 名
   echo "${d%/}"
 }
 
-[[ -d "$BREW_PREFIX" ]] || die "harmonybrew 前缀不存在: $BREW_PREFIX（用 --brew-prefix 覆盖）"
-
-if [[ -z "$NDK_ROOT" ]]; then
-  NDK_ROOT="$(cellar_latest ohos-sdk-native)" || die "未找到 ohos-sdk-native，用 --ndk 指定 NDK 根目录"
+# ---- SDK / NDK 解析：--sdk > OHOS_NDK_HOME > --ndk > harmonybrew Cellar 本机兜底 ----
+if [[ -z "$SDK_ROOT" && -n "${OHOS_NDK_HOME:-}" ]]; then
+  SDK_ROOT="$OHOS_NDK_HOME"
+  log "SDK 来自环境变量 OHOS_NDK_HOME: $SDK_ROOT"
 fi
-[[ -x "$NDK_ROOT/llvm/bin/clang" ]]                       || die "NDK 缺少 llvm/bin/clang: $NDK_ROOT"
-[[ -f "$NDK_ROOT/build/cmake/ohos.toolchain.cmake" ]]     || die "NDK 缺少 ohos.toolchain.cmake: $NDK_ROOT"
-[[ -f "$NDK_ROOT/sysroot/usr/include/pthread.h" ]]        || die "NDK 缺少 sysroot: $NDK_ROOT"
+if [[ -n "$SDK_ROOT" ]]; then
+  if [[ -d "$SDK_ROOT/native" ]]; then
+    NDK_ROOT="$SDK_ROOT/native"
+  elif [[ -x "$SDK_ROOT/llvm/bin/clang" ]]; then
+    # 宽容处理：个别工具链/Action 习惯把变量直接指到 native/ 目录
+    log "--sdk/OHOS_NDK_HOME 目录无 native/ 子目录，按 native/ 目录本身对待: $SDK_ROOT"
+    NDK_ROOT="$SDK_ROOT"
+  else
+    die "--sdk/OHOS_NDK_HOME 指向的目录下既无 native/ 也无 llvm/bin/clang: $SDK_ROOT"
+  fi
+fi
+if [[ -z "$NDK_ROOT" ]]; then
+  # 本机兜底：harmonybrew Cellar 自动发现（ohos-sdk-native 本身即 native/ 目录）
+  NDK_ROOT="$(cellar_latest ohos-sdk-native)" \
+    || die "未找到 ohos-sdk-native，用 --sdk <含 native/ 的 SDK 根目录> 或环境变量 OHOS_NDK_HOME 指定"
+fi
+[[ -x "$NDK_ROOT/llvm/bin/clang" ]] || die "SDK 缺少 llvm/bin/clang: $NDK_ROOT"
+
+# toolchain 文件双路径探测：位置随 SDK 版本在 build/cmake/ 与 build-tools/cmake/ 间变化
+TOOLCHAIN_FILE=""
+for _cand in "$NDK_ROOT/build/cmake/ohos.toolchain.cmake" "$NDK_ROOT/build-tools/cmake/ohos.toolchain.cmake"; do
+  if [[ -f "$_cand" ]]; then
+    TOOLCHAIN_FILE="$_cand"
+    break
+  fi
+done
+[[ -n "$TOOLCHAIN_FILE" ]] \
+  || die "NDK 缺少 ohos.toolchain.cmake（已探测 build/cmake/ 与 build-tools/cmake/ 两处）: $NDK_ROOT"
+[[ -f "$NDK_ROOT/sysroot/usr/include/pthread.h" ]] || die "NDK 缺少 sysroot: $NDK_ROOT"
+
+# cmake/ninja：优先 SDK 内置，缺失回落 PATH（CI 由 apt 提供）
 CMAKE="$NDK_ROOT/build-tools/cmake/bin/cmake"
 NINJA="$NDK_ROOT/build-tools/cmake/bin/ninja"
-[[ -x "$CMAKE" ]] || die "NDK 缺少 cmake: $CMAKE（用 --ndk 指定含 build-tools/cmake 的 NDK）"
-[[ -x "$NINJA" ]] || die "NDK 缺少 ninja: $NINJA"
+[[ -x "$CMAKE" ]] || CMAKE="$(command -v cmake || true)"
+[[ -x "$NINJA" ]] || NINJA="$(command -v ninja || true)"
+[[ -n "$CMAKE" ]] || die "缺少 cmake（SDK 内 build-tools/cmake/bin/cmake 不存在且 PATH 无 cmake）——CI 里 apt install cmake，本机检查 SDK 安装"
+[[ -n "$NINJA" ]] || die "缺少 ninja（SDK 内 build-tools/cmake/bin/ninja 不存在且 PATH 无 ninja）——CI 里 apt install ninja-build，本机检查 SDK 安装"
 
-HOST_CXX="$BREW_PREFIX/bin/clang++"
-GPERF="$BREW_PREFIX/bin/gperf"
-[[ -x "$HOST_CXX" ]] || die "缺少 host 编译器: $HOST_CXX"
-[[ -x "$GPERF" ]]    || die "缺少 gperf: $GPERF（阶段1 生成 TL 源码必需）"
+# host 工具链：优先 harmonybrew（鸿蒙 PC）；前缀不存在时回落 PATH（CI/其它 Linux 由 apt 提供）
+if [[ -d "$BREW_PREFIX" ]]; then
+  HOST_CC="$BREW_PREFIX/bin/clang"
+  HOST_CXX="$BREW_PREFIX/bin/clang++"
+  GPERF="$BREW_PREFIX/bin/gperf"
+else
+  log "harmonybrew 前缀不存在（$BREW_PREFIX），host 工具改从 PATH 发现（CI/非鸿蒙环境属预期）"
+  HOST_CC="$(command -v clang || command -v gcc || true)"
+  HOST_CXX="$(command -v clang++ || command -v g++ || true)"
+  GPERF="$(command -v gperf || true)"
+fi
+[[ -x "$HOST_CC" ]]  || die "缺少 host C 编译器: ${HOST_CC:-PATH 未发现}——本机装 harmonybrew；CI 里 apt install clang"
+[[ -x "$HOST_CXX" ]] || die "缺少 host 编译器: ${HOST_CXX:-PATH 未发现}——本机装 harmonybrew；CI 里 apt install clang"
+[[ -x "$GPERF" ]]    || die "缺少 gperf: ${GPERF:-PATH 未发现}（阶段1 生成 TL 源码必需）——apt install gperf / harmonybrew install gperf"
+
+# ccache 开关：提前校验，别等编到一半才失败（CI 已随 apt 安装；本机无则提示安装）
+CCACHE_ARGS=()
+if [[ "$USE_CCACHE" == "1" ]]; then
+  command -v ccache >/dev/null 2>&1 \
+    || die "--ccache 已启用但 PATH 内无 ccache——CI 随 apt 安装；本机用 harmonybrew/系统包管理器安装后重试"
+  CCACHE_ARGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  log "ccache 已启用（CMAKE_C(XX)_COMPILER_LAUNCHER）"
+fi
 
 if [[ -z "$OPENSSL_ROOT" ]]; then
   OPENSSL_ROOT="$(cellar_latest openssl@4 || cellar_latest openssl@3 || true)"
@@ -135,11 +236,6 @@ assert_aarch64_static_lib() {  # $1=归档路径 $2=名称
 assert_aarch64_static_lib "$OPENSSL_ROOT/lib/libcrypto.a" "libcrypto.a"
 assert_aarch64_static_lib "$OPENSSL_ROOT/lib/libssl.a"    "libssl.a"
 assert_aarch64_static_lib "$ZLIB_ROOT/lib/libz.a"         "libz.a"
-
-TD_SRC="$WORKDIR/td-src"
-HOST_BUILD="$WORKDIR/build/td-host"
-CROSS_BUILD="$WORKDIR/build/td-ohos-arm64"
-mkdir -p "$WORKDIR"
 
 # 内存护栏：可用内存 < 2G 时并行度压到 1（可用 lld 峰值另见 AGENTS.md 构建注意）
 clamp_jobs() {
@@ -193,12 +289,6 @@ apply_patches() {
 }
 
 # ----------------------------- 阶段1：host 生成 TL 源码 -----------------------------
-# auto/ 生成物陷阱：td/generate/auto/ 被 td 仓库 .gitignore 忽略，checkout -f 不会清理它；
-# 版本切换后残留的旧 TL 生成物会被交叉阶段照常编译（编出旧协议）。
-# 对策：auto/ 内记录 stamp（内容=TD_COMMIT），执行时比对——不一致则整目录删除并强制重生成。
-AUTO_DIR="$TD_SRC/td/generate/auto"
-AUTO_STAMP="$AUTO_DIR/.td-commit-stamp"
-
 build_host() {
   log "阶段1/2：host 构建（生成 TL 源码，需要 gperf）"
   local regenerate=0
@@ -215,8 +305,9 @@ build_host() {
     regenerate=1
   fi
   if [[ ! -f "$HOST_BUILD/build.ninja" ]]; then
-    CC="$BREW_PREFIX/bin/clang" CXX="$HOST_CXX" "$CMAKE" -S "$TD_SRC" -B "$HOST_BUILD" -G Ninja \
+    CC="$HOST_CC" CXX="$HOST_CXX" "$CMAKE" -S "$TD_SRC" -B "$HOST_BUILD" -G Ninja \
       -DCMAKE_MAKE_PROGRAM="$NINJA" \
+      "${CCACHE_ARGS[@]}" \
       -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DTD_ENABLE_JNI=OFF \
       -DGPERF_EXECUTABLE="$GPERF"
   fi
@@ -243,7 +334,8 @@ build_cross() {
     #   配合 patches/0003（OHOS 下跳过 CMake 的 SOVERSION 注入）本 flag 才能生效。
     "$CMAKE" -S "$TD_SRC" -B "$CROSS_BUILD" -G Ninja \
       -DCMAKE_MAKE_PROGRAM="$NINJA" \
-      -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/ohos.toolchain.cmake" \
+      -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
+      "${CCACHE_ARGS[@]}" \
       -DOHOS_ARCH=arm64-v8a \
       -DOHOS_STL=c++_static \
       -DCMAKE_BUILD_TYPE=Release \
@@ -334,9 +426,13 @@ collect_artifacts() {
 
 # ----------------------------- 主流程 -----------------------------
 main() {
-  log "TDLib $TD_VERSION @ $TD_COMMIT | NDK: $NDK_ROOT | jobs: $JOBS"
+  local ccache_state="off"
+  [[ "$USE_CCACHE" == "1" ]] && ccache_state="on"
+  log "TDLib $TD_VERSION @ $TD_COMMIT | NDK: $NDK_ROOT | toolchain: $TOOLCHAIN_FILE"
+  log "cmake: $CMAKE | ninja: $NINJA | jobs: $JOBS | ccache: $ccache_state"
   log "openssl: $OPENSSL_ROOT"
   log "zlib:    $ZLIB_ROOT"
+  log "产物目录: $OUT_DIR"
   fetch_td_source
   apply_patches
   build_host
