@@ -30,7 +30,14 @@ git diff --cached | grep -nEi '([0-9]{11}|\+86|token|secret|password|api[_-]?key
 strings <待入库二进制> | grep -nE '/home/|/storage/|/Users/|/data/' | head -20
 ```
 
-有命中 → 禁止入库，先修编译（native 产物统一加 `-ffile-prefix-map=<源码路径>=td` 重映射，从根上杜绝路径编进 .rodata）。
+命中判读（良性白名单，不算违规）：
+- `tg://` 开头的深链 URI（TDLib 内置设置页路径，如 `tg://settings/data/`）
+- `/srv/workspace/llvm-release/...`（华为 OHOS NDK 预编译 libc++abi/libunwind 自带的厂商 CI 路径，任何机器同版 SDK 构建结果一致）
+- `/usr/tmp`、`/var/tmp`（libc 标准回退目录）
+
+本机路径命中 → 禁止入库，先修编译，两层手段缺一不可：
+1. 编译期：native 产物统一加 `-ffile-prefix-map=<源码路径>=td` 重映射（根治 `__FILE__` 宏与 DWARF 路径）；
+2. 静态依赖兜底：预编译静态库（如 openssl）内固化的配置路径 `-ffile-prefix-map` 管不到，需等长字节清洗（见 `scripts/build_tdlib.sh` 的 `sanitize_host_paths`），并在入库前设门禁校验（非 0 即停）。
 
 ## 构建注意
 
