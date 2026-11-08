@@ -5,5 +5,8 @@
   "main": "",
   "author": "",
   "license": "",
-  "dependencies": {}
+  "dependencies": {
+    // libtdnapi.so 的 ArkTS 类型声明（import ... from 'libtdnapi.so' 的类型来源）
+    "libtdnapi": "file:./src/main/cpp/types/libtdnapi"
+  }
 }
