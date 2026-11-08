@@ -92,10 +92,10 @@ jobs:
 
 - **workflow 文件**：`.github/workflows/build-tdlib.yml`
 - **触发方式**：
-  - merge 后**先手动 `workflow_dispatch` 实测**（Actions 页选 build-tdlib → Run workflow，可输入 sdk_version，默认 7.0）；
-  - 实测通过后再用 push tag `tdlib-v*` 触发（注意：回库 push 目标固定 `HEAD:main`，tag 需为 main 祖先，非 FF 失败属预期护栏）。
+  - merge 后**先手动 `workflow_dispatch` 实测**（Actions 页选 build-tdlib → Run workflow，可输入 sdk_version，默认 7.0；输入仅接受 x.y 形式，非该格式 fail-fast）；
+  - 实测通过后再用 push tag `tdlib-v*` 触发（回库步带 `github.ref == 'refs/heads/main'` 分支护栏，tag 构建不回库、产物走 artifact 留档；即便护栏放行，push 目标固定 `HEAD:main`，非 FF 会被服务端拒绝，属预期兜底）。
 - **与第三节骨架的差异**（实现时补全/修正，均必要）：
-  1. **新增 openssl/zlib 交叉构建步骤并独立 cache**（骨架缺口）：SDK sysroot 无 openssl、zlib 仅动态库，本机靠 harmonybrew 静态库而 CI 没有——workflow 内用 OHOS toolchain/target clang 编 OpenSSL 3.5.8（3.5 为唯一在维护 LTS；3.4/3.6 已 EOL）与 zlib 1.3.1 静态库，经 `--openssl-root/--zlib-root` 传入；
+  1. **新增 openssl/zlib 交叉构建步骤并独立 cache**（骨架缺口）：SDK sysroot 无 openssl、zlib 仅动态库，本机靠 harmonybrew 静态库而 CI 没有——workflow 内用 OHOS toolchain/target clang 编 OpenSSL 3.5.9（3.5 为唯一在维护 LTS；3.4/3.6 已 EOL；3.5.9 为安全补丁版，release 资产 `.tar.gz` 并附官方 `.tar.gz.sha256`）与 zlib 1.3.1 静态库，经 `--openssl-root/--zlib-root` 传入；openssl Configure 加 `-fPIC -D__MUSL__=1`（libtdjson.so 是共享库，非 PIC 静态归档链接期 relocation 报错；对齐社区配方 ErBWs/tdlib-ohos-build）；
   2. SDK 只解压 `native` 组件（骨架解压全部 linux 组件；磁盘与 10GB cache 配额减半）；
   3. apt 增加 `clang` 与 `apt-get update`（host 阶段编译器显式声明）；
   4. `sdk_version` 输入实际接入 `OHOS_SDK_VER`（骨架 env 写死 7.0 未接输入）；
@@ -107,7 +107,11 @@ jobs:
   - [ ] OpenSSL `linux-aarch64` + NDK target wrapper（`aarch64-unknown-linux-ohos-clang`）交叉构建成功率；首跑人工核对脚本输出的 AArch64 断言与 SONAME 校验日志
   - [ ] TDLib 全量时长 vs 2vCPU 预估 30~50min（timeout 90min 是否富余）；二次运行 ccache 命中率
   - [ ] bot commit 回库链路（GITHUB_TOKEN contents:write + main 分支保护设置）
-  - [ ] tag 触发链路（tag 在 main tip 上时 `HEAD:main` 为 FF，可正常回库）
+  - [ ] tag 触发链路（回库步被分支护栏跳过，确认 artifact 留档正常）
   - [ ] td-src 全量 clone 耗时（未缓存，后续可加 actions/cache）
   - [ ] CI 产物真机回归（加载/登录/收发消息）——与本地产物 sha256 必然不同，验收口径=功能等价（§五.1）
-- **脚本侧配套**（同分支第一个 commit）：`--sdk`/`OHOS_NDK_HOME`（唯一 SDK 入口，本机 harmonybrew 兜底保留）、toolchain 双路径探测、`--ccache`、`--out`、`--jobs` 默认 nproc（内存 clamp 保留）、`--clean`；cmake/ninja 与 host 编译器/gperf 增加 PATH 回退（CI/非鸿蒙环境），harmonybrew 存在时本机行为不变。
+  - [ ] dispatch 分支护栏验证：从非 main 分支 dispatch，回库步应被 `github.ref == 'refs/heads/main'` 护栏跳过（Actions 日志显示 step skipped）
+  - [ ] 产物入库后 sha256sum -c 复核：clone main 后 `(cd libs/arm64-v8a && sha256sum -c SHA256SUMS)` 通过
+  - [ ] sdk_version 非 7.0 变体实测：6.x 的华为云目录名是 `6.0.0.1-Release` 这类四段格式，与 `${ver}-Release` 拼法不一致会 404（x.y 格式护栏不拦目录名差异，需实测确认实际可用值）
+- **后续功能项**：unstripped 副本（构建目录内 ≈53MB，供崩溃符号化）随 tag 构建上传 GitHub Release——当前仅 strip 后产物以 artifact 留档 7 天，过期后符号化需重编。
+- **脚本侧配套**（同分支第一个 commit）：`--sdk`/`OHOS_NDK_HOME`（唯一 SDK 入口，本机 harmonybrew 兜底保留）、toolchain 双路径探测、`--ccache`、`--out`、`--jobs`、`--clean`；cmake/ninja 与 host 编译器/gperf 增加 PATH 回退（CI/非鸿蒙环境）。注意：默认并行度提升为 nproc（原脚本默认 1；可用内存 < 2G 时 clamp 仍自动压回 1），本机默认行为有此一处变化，其余不变。
