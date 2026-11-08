@@ -85,3 +85,29 @@ jobs:
 - TDLib-OHOS 构建脚本（与本仓库同构）：https://github.com/ErBWs/tdlib-ohos-build
 - TDLib Android CI 产物回库范式：https://github.com/AkashPriyadarshii/tdlib-android/blob/master/.github/workflows/build.yml
 - runner/配额文档：https://docs.github.com/en/actions/reference/runners/github-hosted-runners 、https://docs.github.com/en/actions/reference/limits
+
+## 七、落地状态（2026-11，分支 feat/ci-build-workflow）
+
+第四节参数化清单已全部落地（见 `scripts/build_tdlib.sh -h`），流水线文件已实现。
+
+- **workflow 文件**：`.github/workflows/build-tdlib.yml`
+- **触发方式**：
+  - merge 后**先手动 `workflow_dispatch` 实测**（Actions 页选 build-tdlib → Run workflow，可输入 sdk_version，默认 7.0）；
+  - 实测通过后再用 push tag `tdlib-v*` 触发（注意：回库 push 目标固定 `HEAD:main`，tag 需为 main 祖先，非 FF 失败属预期护栏）。
+- **与第三节骨架的差异**（实现时补全/修正，均必要）：
+  1. **新增 openssl/zlib 交叉构建步骤并独立 cache**（骨架缺口）：SDK sysroot 无 openssl、zlib 仅动态库，本机靠 harmonybrew 静态库而 CI 没有——workflow 内用 OHOS toolchain/target clang 编 OpenSSL 3.5.8（3.5 为唯一在维护 LTS；3.4/3.6 已 EOL）与 zlib 1.3.1 静态库，经 `--openssl-root/--zlib-root` 传入；
+  2. SDK 只解压 `native` 组件（骨架解压全部 linux 组件；磁盘与 10GB cache 配额减半）；
+  3. apt 增加 `clang` 与 `apt-get update`（host 阶段编译器显式声明）；
+  4. `sdk_version` 输入实际接入 `OHOS_SDK_VER`（骨架 env 写死 7.0 未接输入）；
+  5. 回库 push 目标固定 `HEAD:main`、产物无变化时跳过 commit、显式 `permissions: contents: write`；
+  6. commit subject 中文规约：`chore(tdlib): 重编 libtdjson.so [skip ci]`。
+- **待实测项清单**（首次 dispatch 后逐项确认）：
+  - [ ] SDK 直链 3.2GiB 在 runner 的下载耗时与成功率
+  - [ ] 解压后 native（≈4~5GB）能否稳定进 actions/cache（repo 配额 10GB，与 ccache 5G 互挤，必要时改缓存 zip）
+  - [ ] OpenSSL `linux-aarch64` + NDK target wrapper（`aarch64-unknown-linux-ohos-clang`）交叉构建成功率；首跑人工核对脚本输出的 AArch64 断言与 SONAME 校验日志
+  - [ ] TDLib 全量时长 vs 2vCPU 预估 30~50min（timeout 90min 是否富余）；二次运行 ccache 命中率
+  - [ ] bot commit 回库链路（GITHUB_TOKEN contents:write + main 分支保护设置）
+  - [ ] tag 触发链路（tag 在 main tip 上时 `HEAD:main` 为 FF，可正常回库）
+  - [ ] td-src 全量 clone 耗时（未缓存，后续可加 actions/cache）
+  - [ ] CI 产物真机回归（加载/登录/收发消息）——与本地产物 sha256 必然不同，验收口径=功能等价（§五.1）
+- **脚本侧配套**（同分支第一个 commit）：`--sdk`/`OHOS_NDK_HOME`（唯一 SDK 入口，本机 harmonybrew 兜底保留）、toolchain 双路径探测、`--ccache`、`--out`、`--jobs` 默认 nproc（内存 clamp 保留）、`--clean`；cmake/ninja 与 host 编译器/gperf 增加 PATH 回退（CI/非鸿蒙环境），harmonybrew 存在时本机行为不变。

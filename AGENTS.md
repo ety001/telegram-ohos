@@ -44,6 +44,7 @@ strings <待入库二进制> | grep -nE '/home/|/storage/|/Users/|/data/' | head
 - 目标 API 26（HarmonyOS 7，真机三件套 PC/手机/平板均为该版本）；`deviceTypes: ["2in1","tablet","phone"]` 三形态自适应（2026-04 变更）。注意：含 phone 后 PC 端最小化同样触发后台管控，双端保活依赖长时任务（见 PLAN.md M4）。
 - TDLib 版本锁定在 `patches/` 对应的版本；升级 = 重放补丁 + 全量回归，独立任务处理。
 - 交叉编译 TDLib：host 侧需 gperf 与 CMake ≥3.10，先 `prepare_cross_compiling` 再用 OHOS NDK 工具链编 `tdjson`。
+- TDLib 重编优先走 GitHub Actions（`.github/workflows/build-tdlib.yml`：merge 后手动 workflow_dispatch 实测，日常 push tag `tdlib-v*` 触发），本机鸿蒙 PC 编译仅作兜底（CI 故障/紧急 hotfix/断网）；两端产物 sha256 天然不同，验收口径=功能等价（见 docs/CI-RESEARCH.md §五、§七）。
 - libtdjson.so 实测体积：unstripped ≈53MB，`llvm-strip --strip-unneeded` 后 ≈34MB（静态并入 openssl/libc++ 且无 LTO 所致；社区参考值 19MB 为 Android LTO+strip 口径，勿混淆）。**入库产物一律 strip 后提交**，unstripped 副本另存（GitHub Release）供崩溃符号化。
 - TDLib 数据库/文件目录一律放应用沙盒（`context.filesDir`/`cacheDir`），禁止写共享目录。
 - 网络策略：协议流量全部走 TDLib；应用内代理设置（SOCKS5/MTProto）是必备功能，不是可选。
