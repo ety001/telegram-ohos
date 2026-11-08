@@ -1,0 +1,18 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 92b52f7d1..8b8bf6c52 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1555,5 +1555,11 @@ install(FILES "TdConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/TdConfigVersion.cmak
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Td"
+ )
+ 
+-# Add SOVERSION to shared libraries
+-set_property(TARGET tdjson PROPERTY SOVERSION "${TDLib_VERSION}")
++# Add SOVERSION to shared libraries.
++# OHOS: keep the library unversioned (plain libtdjson.so). The app's NAPI bridge
++# links and dlopen-s against the file name, so a versioned SONAME
++# (libtdjson.so.<version>) would make the on-device loader fail. The build script
++# sets SONAME=libtdjson.so explicitly via CMAKE_SHARED_LINKER_FLAGS.
++if (NOT CMAKE_SYSTEM_NAME STREQUAL "OHOS")
++  set_property(TARGET tdjson PROPERTY SOVERSION "${TDLib_VERSION}")
++endif()
