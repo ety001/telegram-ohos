@@ -1,0 +1,7 @@
+telegram-ohos
+Copyright 2026 ety001
+
+This product includes TDLib (https://github.com/tdlib/td), licensed under
+the Boost Software License 1.0. Static-linked components: OpenSSL
+(Apache License 2.0), zlib (Zlib license), libc++/libc++abi (Apache-2.0
+WITH LLVM-exception). See THIRD-PARTY-NOTICES for the full license texts.

@@ -4,7 +4,7 @@
 
 - 技术栈：ArkTS / ArkUI (API 26, 三形态自适应) + TDLib (libtdjson) + NAPI 桥
 - 目标设备：HarmonyOS 7 全家桶——PC / 手机 / 平板（真机均为 API 26）
-- 状态：🚧 M0 工程骨架已完成（PR #1）；M1 TDLib 交叉编译复审中；deviceTypes 三形态自 M2 落地
+- 状态：🚧 M0 工程骨架 ✅（PR #1）；M1 TDLib 交叉编译 ✅（PR #2，libtdjson.so v1.8.63）；CI 编译流水线落地中；deviceTypes 三形态自 M2 落地
 
 ## 文档
 
@@ -15,6 +15,12 @@
 | [docs/CI-RESEARCH.md](docs/CI-RESEARCH.md) | CI 编译迁移调研：双轨方案、GitHub Actions workflow 设计 |
 | [AGENTS.md](AGENTS.md) | 工程约定：提交规范、脱敏规则、构建注意 |
 
+## License
+
+本项目基于 [Apache License 2.0](LICENSE) 开源，版权所有 © 2026 ety001；第三方组件声明见 [NOTICE](NOTICE) 与 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)。
+
 ## 声明
 
-本项目仅供作者本人学习与使用，不分发、不发布。Telegram 是 Telegram Messenger Inc. 的商标，本项目与其无关联。
+> **Unofficial Telegram client for HarmonyOS.** Not affiliated with, or endorsed by, Telegram Messenger Inc. "Telegram" is a trademark of its respective owner.
+
+本项目面向个人自用场景开发。Telegram 是 Telegram Messenger Inc. 的商标，本项目与其无关联、未获官方认可；应用标题不含官方商标要求所允许之外的表述，如未来公开发布，将遵循 Telegram API 服务条款（"Unofficial" 前缀或改名、不使用官方 logo、使用自申请的 api_id）。

@@ -47,6 +47,7 @@ strings <待入库二进制> | grep -nE '/home/|/storage/|/Users/|/data/' | head
 - libtdjson.so 实测体积：unstripped ≈53MB，`llvm-strip --strip-unneeded` 后 ≈34MB（静态并入 openssl/libc++ 且无 LTO 所致；社区参考值 19MB 为 Android LTO+strip 口径，勿混淆）。**入库产物一律 strip 后提交**，unstripped 副本另存（GitHub Release）供崩溃符号化。
 - TDLib 数据库/文件目录一律放应用沙盒（`context.filesDir`/`cacheDir`），禁止写共享目录。
 - 网络策略：协议流量全部走 TDLib；应用内代理设置（SOCKS5/MTProto）是必备功能，不是可选。
+- 发版物（HAP 等发布包）必须随附 LICENSE、NOTICE、THIRD-PARTY-NOTICES 三件套（Apache-2.0 §4 与各第三方许可的分发义务）。
 
 ## 目录规划（随里程碑逐步落地）
 
