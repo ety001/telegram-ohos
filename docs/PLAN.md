@@ -6,7 +6,10 @@ todos:
     content: M0 DevEco 工程骨架（API 26、权限声明）+ 三栏占位页（PR #1 已 merge；真机侧载待工具链就绪后冒烟）
     status: completed
   - id: m1-tdlib-build
-    content: M1 交叉编译 TDLib → libtdjson.so（复用仓库内 openssl/zlib，社区补丁 2 处）
+    content: M1 交叉编译 TDLib → libtdjson.so v1.8.63（三轮复审通过：路径泄漏 552→0、SONAME 修正、strip 34MB；PR #2 已 merge）
+    status: completed
+  - id: ci-build-workflow
+    content: GitHub Actions 编译流水线落地（build-tdlib.yml + build_tdlib.sh 三端参数化收口，双轨方案见 docs/CI-RESEARCH.md）
     status: pending
   - id: m1-napi-bridge
     content: M1 NAPI 桥（td_json_client 四函数 + 线程安全回调）+ td_execute 连通验证
@@ -51,6 +54,7 @@ todos:
 | MVP 范围 | **精简版** | 文本收发 + 图片/视频/文件 + 本地通知；贴纸/语音/通话留二期 |
 | TDLib 二进制 | **两步走** | 先社区脚本快速起步，后接入自有流水线固化（openssl/zlib 仓库内已有） |
 | UI 设计 | **完全自研**（评估 TelegramHarmony 后弃用其参考价值） | 其无 LICENSE 且协议层有 CRITICAL 缺陷；PC-only 桌面交互按本项目需求全新设计 |
+| 编译迁移 | **双轨**：GitHub Actions 为主 + 本机兜底（调研结论 docs/CI-RESEARCH.md） | 本机 aarch64 全量 65 分钟风扇狂转；私有库 runner 2C/8G 全量约 30-50 分钟，SDK 安装 Action / 缓存 / 产物回库范式均有现成生态 |
 
 ## 3. 调研结论依据（详见 docs/RESEARCH.md）
 

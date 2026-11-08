@@ -12,6 +12,7 @@
 |---|---|
 | [docs/PLAN.md](docs/PLAN.md) | 开发计划：里程碑、验收标准、风险清单 |
 | [docs/RESEARCH.md](docs/RESEARCH.md) | 调研报告：TDLib 移植可行性、鸿蒙平台能力与限制 |
+| [docs/CI-RESEARCH.md](docs/CI-RESEARCH.md) | CI 编译迁移调研：双轨方案、GitHub Actions workflow 设计 |
 | [AGENTS.md](AGENTS.md) | 工程约定：提交规范、脱敏规则、构建注意 |
 
 ## 声明
