@@ -9,8 +9,8 @@ todos:
     content: M1 交叉编译 TDLib → libtdjson.so v1.8.63（三轮复审通过：路径泄漏 552→0、SONAME 修正、strip 34MB；PR #2 已 merge）
     status: completed
   - id: ci-build-workflow
-    content: GitHub Actions 编译流水线落地（build-tdlib.yml + build_tdlib.sh 三端参数化收口，双轨方案见 docs/CI-RESEARCH.md）
-    status: pending
+    content: GitHub Actions 编译流水线（PR #3 已 merge；首跑实测通过 21m16s，产物 bot 自动回库，校验全绿）
+    status: completed
   - id: m1-napi-bridge
     content: M1 NAPI 桥（td_json_client 四函数 + 线程安全回调）+ td_execute 连通验证
     status: pending
