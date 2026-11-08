@@ -1,6 +1,14 @@
 {
   "apiType": "stageMode",
-  "buildOption": {},
+  "buildOption": {
+    // NAPI 桥（libtdnapi.so）：C++ 工程入口。独立实编验证走 scripts/build-napi-bridge.sh
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "arguments": "",
+      "cppFlags": "",
+      "cFlags": ""
+    }
+  },
   "targets": [
     {
       "name": "default"
