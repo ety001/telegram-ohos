@@ -1,10 +1,10 @@
 # telegram-ohos
 
-鸿蒙 PC 原生 Telegram 客户端（个人自用，不上架应用市场）。
+鸿蒙原生 Telegram 客户端（个人自用，不上架应用市场）。
 
-- 技术栈：ArkTS / ArkUI (API 26, PC-only) + TDLib (libtdjson) + NAPI 桥
-- 目标设备：HarmonyOS 7 PC / 2in1
-- 状态：🚧 规划完成，待开工（见 [docs/PLAN.md](docs/PLAN.md)）
+- 技术栈：ArkTS / ArkUI (API 26, 三形态自适应) + TDLib (libtdjson) + NAPI 桥
+- 目标设备：HarmonyOS 7 全家桶——PC / 手机 / 平板（真机均为 API 26）
+- 状态：🚧 M0 工程骨架已完成（PR #1）；M1 TDLib 交叉编译复审中；deviceTypes 三形态自 M2 落地
 
 ## 文档
 

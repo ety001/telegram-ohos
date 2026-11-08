@@ -3,8 +3,8 @@ name: telegram-ohos 鸿蒙原生 Telegram 客户端开发计划
 overview: 基于 TDLib + ArkUI 的鸿蒙 PC 原生 Telegram 客户端（自用不上架），从工程骨架到 MVP 全流程的实施计划。
 todos:
   - id: m0-scaffold
-    content: M0 DevEco 工程骨架（API 26、PC-only、权限声明）+ 自动签名侧载真机跑通
-    status: pending
+    content: M0 DevEco 工程骨架（API 26、权限声明）+ 三栏占位页（PR #1 已 merge；真机侧载待工具链就绪后冒烟）
+    status: completed
   - id: m1-tdlib-build
     content: M1 交叉编译 TDLib → libtdjson.so（复用仓库内 openssl/zlib，社区补丁 2 处）
     status: pending
@@ -15,7 +15,7 @@ todos:
     content: M2 登录链路（手机号/验证码/2FA + setTdlibParameters 全数据库开启）
     status: pending
   - id: m2-chat-list
-    content: M2 会话列表（LazyForEach + getChats + TDLib 更新流分发架构）
+    content: M2 会话列表（LazyForEach + getChats + 更新流分发）+ 响应式地基（断点/组件化/deviceTypes 扩展三形态）
     status: pending
   - id: m3-messaging
     content: M3 消息收发（sendMessage + 消息列表渲染 + 已读回执）
@@ -27,7 +27,7 @@ todos:
     content: M3 本地通知（notificationManager + 通知点击路由到会话）
     status: pending
   - id: m4-keepalive
-    content: M4 PC 常驻（最小化不挂起验证 + TASK_KEEPING 长时任务兜底）
+    content: M4 双端后台与保活（PC TASK_KEEPING + 手机长时任务评估 + 限制说明）
     status: pending
   - id: m5-polish
     content: M5 打磨（emoji 面板、会话搜索、主题、代理设置页、一周稳定性）
@@ -47,7 +47,7 @@ todos:
 | 决策点 | 选择 | 理由 |
 |---|---|---|
 | 技术路线 | **TDLib (tdjson) + ArkUI 自研** | 5 个社区移植先例、补丁极小、Boost 协议零限制；纯 ArkTS 实现 MTProto 工作量爆炸 |
-| 目标设备 | **仅鸿蒙 PC（PC-only）** | 吃满生命周期红利：最小化不进后台；TASK_KEEPING 免 ACL |
+| 目标设备 | **PC + 手机 + 平板，UI 全自适应**（2026-04 变更，原仅 PC） | 全设备覆盖；代价：deviceTypes 含 phone 后，PC 端最小化也不再豁免后台管控，双端保活均依赖长时任务 |
 | MVP 范围 | **精简版** | 文本收发 + 图片/视频/文件 + 本地通知；贴纸/语音/通话留二期 |
 | TDLib 二进制 | **两步走** | 先社区脚本快速起步，后接入自有流水线固化（openssl/zlib 仓库内已有） |
 | UI 设计 | **完全自研**（评估 TelegramHarmony 后弃用其参考价值） | 其无 LICENSE 且协议层有 CRITICAL 缺陷；PC-only 桌面交互按本项目需求全新设计 |
@@ -57,7 +57,7 @@ todos:
 1. **TDLib 可行性：高**。Eclipse Oniro 官方生态 Tele4Watch（TDLib 1.8.63 真机跑通）、Telegram-HarmonyOS（活跃）、tdnapi（NAPI 封装+类型声明）均可复用；必需补丁仅 2 处（platform.h 加 TD_OHOS 宏、ThreadPthread.h 排除 pthread affinity）。libtdjson.so ≈ 19MB。
 2. **平台能力**：`@ohos.net.socket` TCP/TLS 仅需 INTERNET 权限；PC-only 应用最小化不触发 UIAbility 后台化；TASK_KEEPING 在 PC/2in1 免 ACL；本地通知需用户授权一次。
 3. **平台限制**：Push Kit 对不上架应用有每日 2~5 条频控 → 弃用，走"常驻长连接 + 本地通知"；剪贴板读取用 PasteButton 安全控件；调试证书约 6 个月有效期需重签。
-4. **版本对应**：HarmonyOS 7.0 = API 26；DevEco 需配 API 26 SDK。
+4. **版本对应**：HarmonyOS 7.0 = API 26；DevEco 需配 API 26 SDK。用户自有真机（PC/手机/平板）确认均为 HarmonyOS 7（API 26），`compatibleSdkVersion: "26.0.0"` 全设备可装，无需降档。
 
 ## 4. 系统架构
 
@@ -109,6 +109,14 @@ todos:
 - **聊天区**：消息流按天分组；ReplyPreview 回复引用；输入区含 emoji 面板、附件、发送按钮。
 - **PC 特性**：窗口尺寸/位置记忆、Ctrl+F 全局搜索、Esc 收起子面板、右键上下文菜单。
 
+### UI 响应式（三形态自适应）
+
+- **断点**（ArkUI windowWidth 断点）：sm(<600vp 手机) / md(600~840vp 平板竖屏、PC 窄窗口) / lg(≥840vp PC、平板横屏)。
+- **sm 单栏栈**：会话列表页 → 聊天页推入；导航条收纳为底栏/顶栏；处理安全区（状态栏/挖孔/手势条）与系统返回手势。
+- **md/lg 三栏**：复用 PC 三栏布局；md 可降级为两栏（列表+聊天，导航条收纳）。
+- **组件化地基（M2 必须落地）**：ChatListPanel / ChatPanel 做成可嵌入组件，页面只是容器——同一份 UI 三形态复用；监听窗口尺寸实时切断点（PC 自由窗口缩放同样受益）。
+- **deviceTypes**：扩展为 `["2in1", "tablet", "phone"]`（M2 PR 落地）。
+
 ## 5. 里程碑与验收标准
 
 ### M0 工程骨架与侧载通路（约 0.5 周）
@@ -123,10 +131,11 @@ todos:
 - 代理支持立项：TDLib `addProxy`（SOCKS5/MTProto），设置页透出（国内网络刚需）。
 - **验收**：真机 `td_execute(getVersion)` 返回版本号；`td_send` 初始化数据库成功；代理连通 DC。
 
-### M2 登录与会话骨架（约 1 周）
+### M2 登录与会话骨架（约 1~1.5 周）
 - `setTdlibParameters`（三个 database 全开）→ 手机号 → 验证码 → 2FA 密码 → `authorizationStateReady`。
 - 会话列表：`getChats`/`loadChats` + LazyForEach；更新流分发框架（按 TDLib class 路由）。
-- **验收**：真实账号登录成功，会话列表与官方客户端一致。
+- **响应式地基**：断点工具 + ChatListPanel 组件化；deviceTypes 扩展为 `["2in1","tablet","phone"]`；手机安全区与单栏栈路由。
+- **验收**：真实账号登录成功，会话列表与官方客户端一致；PC/手机/平板三形态断点均真机可用（用户已确认具备真机）。
 
 ### M3 核心聊天 MVP（约 1.5~2 周）
 - 消息列表 + `sendMessage`（文本）+ 已读回执（`viewMessages`）。
@@ -134,9 +143,11 @@ todos:
 - 本地通知（`notificationManager.publish`，含 requestEnableNotification 引导）+ 点击路由到会话。
 - **验收**：真实聊天收发文本/图片；新消息弹通知；最小化期间通知可用。
 
-### M4 PC 常驻（约 0.5 周）
-- 验证 PC-only 应用最小化不挂起；申请 TASK_KEEPING 长时任务兜底（常驻通知）。
-- **验收**：应用最小化 >24h，消息仍实时送达并通知。
+### M4 双端后台与保活（约 0.5~1 周）
+- 背景：deviceTypes 含 phone 后，PC 端最小化同样触发后台管控——两端保活统一依赖长时任务。
+- PC：TASK_KEEPING（免 ACL）兜底；手机：评估 VOIP / DATA_TRANSFER（16kB/60s 心跳约束）长时任务方案 + 常驻通知。
+- 手机端冻结期消息延迟属已知限制，前台恢复即追平；可选增强：自建通知桥（TG Bot 转发提醒）。
+- **验收**：PC 最小化 >24h 消息送达；手机端给出保活实测结论与明确的限制说明。
 
 ### M5 打磨（约 1 周，持续迭代）
 - emoji 面板 + RichEditor 图文混排；会话搜索/置顶/免打扰；深色模式；代理设置页；崩溃与 ANR 治理。
@@ -152,7 +163,7 @@ todos:
 | TDLib 升级需重放补丁 | 锁定 1.8.x 版本，升级视为独立任务 |
 | libtdjson 体积/内存 | 全数据库开启 + 媒体缓存上限 + LTO 裁剪 |
 | 调试证书过期（约 6 个月） | 写重签脚本，记到期时间，到期前提醒 |
-| 无系统级推送 | PC 常驻长连接方案；不依赖 Push Kit |
+| 无系统级推送 | 常驻长连接 + 本地通知；不依赖 Push Kit；手机端可加自建通知桥兜底 |
 | 国内直连 Telegram 不通 | 应用内置代理设置（SOCKS5/MTProto，走本机代理） |
 | 社区预编译产物不可信 | 仅作起步，M1 结束前替换为自编产物（校验 SHA256） |
 
