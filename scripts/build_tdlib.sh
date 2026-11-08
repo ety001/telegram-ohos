@@ -37,7 +37,7 @@ OPENSSL_ROOT=""
 ZLIB_ROOT=""
 
 usage() {
-  cat <<'USAGE'
+  cat <<USAGE
 用法：scripts/build_tdlib.sh [选项]
 
 TDLib (tdjson) 交叉编译脚本 —— 目标 aarch64-linux-ohos (arm64-v8a)
@@ -50,7 +50,7 @@ TDLib (tdjson) 交叉编译脚本 —— 目标 aarch64-linux-ohos (arm64-v8a)
   --jobs N, -j N       并行度（默认 1；可用内存 < 2G 时自动降为 1）
   --ndk PATH           OHOS NDK 根目录（默认按 harmonybrew Cellar 自动发现）
   --td-version X.Y.Z   TDLib 版本号，须与源码 CMakeLists 的 project VERSION 一致
-  --td-commit SHA      TDLib 上游 commit（默认 f06b0bac65278b03d26414c096080e7bfecfef52）
+  --td-commit SHA      TDLib 上游 commit（默认 $TD_COMMIT_DEFAULT，见脚本顶部同名变量）
   --brew-prefix PATH   harmonybrew 前缀（默认 ~/.harmonybrew）
   --workdir PATH       构建工作目录（默认 ~/DevEco，下含 td-src/ 与 build/）
   --openssl-root PATH  openssl 根目录（含 lib/libcrypto.a、lib/libssl.a，aarch64-ohos）
@@ -322,12 +322,11 @@ collect_artifacts() {
   [[ "$leak_count" == "0" ]] \
     || die "产物仍含本机路径 ${leak_count} 处（strings | grep -E '/home/|/storage/|/Users/'）—— 禁止入库"
 
-  # SHA256 清单（sha256sum -c 兼容：# 开头行为注释；本文件由脚本生成，勿手改）
-  {
-    echo "# libtdjson —— TDLib $TD_VERSION (commit $TD_COMMIT), aarch64-linux-ohos"
-    echo "# SONAME: $soname"
-    (cd "$OUT_DIR" && sha256sum libtdjson.so)
-  } > "$OUT_DIR/SHA256SUMS"
+  # SHA256 清单：只写哈希行，不写 # 注释头。GNU coreutils 的 sha256sum -c 把 # 开头行当注释，
+  # 但 toybox（本机 0.8.12）等实现会把它当文件名报错、exit 1——"注释兼容"并非跨实现保证，
+  # 纯哈希行才是 sha256sum -c 的最大公约数。版本/commit/SONAME 元信息见 patches/README.md
+  # 的锁定版本表，不写入本文件。本文件由脚本生成，勿手改。
+  (cd "$OUT_DIR" && sha256sum libtdjson.so) > "$OUT_DIR/SHA256SUMS"
 
   log "产物就绪：$OUT_DIR/libtdjson.so ($(du -h "$OUT_DIR/libtdjson.so" | cut -f1), SONAME=$soname, 已 strip)"
   cat "$OUT_DIR/SHA256SUMS"

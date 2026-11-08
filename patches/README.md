@@ -33,6 +33,7 @@
 ## 升级流程
 
 1. 修改 `scripts/build_tdlib.sh` 中 `TD_VERSION` / `TD_COMMIT`（新版本对应 "Update version to X.Y.Z" 提交）。
-2. 重放补丁：`git apply` 失败时手工修冲突并重新生成 patch 文件（在 TDLib 源码树内 `git diff > <repo>/patches/xxx.patch`）。
-3. **TL 生成物自动失效**：`td/generate/auto/` 被 td 仓库 `.gitignore` 忽略，`checkout -f` 不会清理它，版本切换后残留旧 TL 生成物会编出旧协议。构建脚本在 `auto/` 内维护 stamp 文件（内容 = `TD_COMMIT`），检测到不一致即删除整个 `auto/` 目录并强制重跑 `prepare_cross_compiling`，升级时无需手工干预。
-4. 全量重编 + 真机回归（见 AGENTS.md「构建注意」）。入库产物由脚本自动 `llvm-strip --strip-unneeded`（≈53MB → ≈34MB）；unstripped 原件保留在构建目录 `<workdir>/build/td-ohos-arm64/libtdjson.so.unstripped`（在仓库外、不入 git），供崩溃符号化。`SHA256SUMS` 由脚本生成，勿手改。
+2. 同步 `THIRD-PARTY-NOTICES` 第 1 节 TDLib 的版本/commit 行（声明与产物版本联动，勿漏）。
+3. 重放补丁：`git apply` 失败时手工修冲突并重新生成 patch 文件（在 TDLib 源码树内 `git diff > <repo>/patches/xxx.patch`）。
+4. **TL 生成物自动失效**：`td/generate/auto/` 被 td 仓库 `.gitignore` 忽略，`checkout -f` 不会清理它，版本切换后残留旧 TL 生成物会编出旧协议。构建脚本在 `auto/` 内维护 stamp 文件（内容 = `TD_COMMIT`），检测到不一致即删除整个 `auto/` 目录并强制重跑 `prepare_cross_compiling`，升级时无需手工干预。
+5. 全量重编 + 真机回归（见 AGENTS.md「构建注意」）。入库产物由脚本自动 `llvm-strip --strip-unneeded`（≈53MB → ≈34MB）；unstripped 原件保留在构建目录 `<workdir>/build/td-ohos-arm64/libtdjson.so.unstripped`（在仓库外、不入 git），供崩溃符号化。`SHA256SUMS` 由脚本生成，勿手改。

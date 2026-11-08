@@ -38,6 +38,7 @@ DEALINGS IN THE SOFTWARE.
 2. OpenSSL
 ----------
 - 组件：OpenSSL（libcrypto.a / libssl.a），静态链接进 libtdjson.so
+- 实际链接版本：4.1.0（harmonybrew openssl@4；产物 .rodata 残留 "OpenSSL 4.1.0 23 Oct 2026"）
 - 许可：Apache License 2.0（OpenSSL 3.x 起适用）
 - 许可原文：https://www.openssl.org/source/license.html
 - 许可全文：https://www.apache.org/licenses/LICENSE-2.0
@@ -47,3 +48,11 @@ DEALINGS IN THE SOFTWARE.
 - 组件：zlib（libz.a，zlib-ng 兼容层构建），静态链接进 libtdjson.so
 - 许可：Zlib License
 - 许可原文：https://opensource.org/licenses/Zlib
+
+4. libc++ / libc++abi
+---------------------
+- 组件：LLVM libc++ 与 libc++abi（C++ 运行时），静态链入 libtdjson.so
+- 来源：OHOS NDK 预编译静态库（构建参数 OHOS_STL=c++_static，ohos-sdk-native 分发）
+- 许可：Apache License 2.0 with LLVM Exceptions（SPDX: Apache-2.0 WITH LLVM-exception）
+- 许可原文：https://llvm.org/foundation/relicensing/LICENSE.txt
+- Apache-2.0 全文链接见上第 2 节
