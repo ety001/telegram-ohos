@@ -63,7 +63,7 @@ jobs:
           max-size: "5G"
 
       - name: 缓存解压后 OHOS SDK
-        uses: actions/cache@0057852bfaa89a56745cba4c7296529d2fc39830 # v4.3.0（v4 浮动 tag 当前指向）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0（v4 浮动 tag 当前指向）
         id: sdk
         with:
           path: ${{ env.OHOS_SDK_HOME }}
@@ -104,7 +104,7 @@ jobs:
           }
 
       - name: 缓存 aarch64-ohos 依赖（openssl/zlib 静态库）
-        uses: actions/cache@0057852bfaa89a56745cba4c7296529d2fc39830 # v4.3.0（v4 浮动 tag 当前指向）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0（v4 浮动 tag 当前指向）
         id: deps
         with:
           path: ${{ env.OHOS_DEPS_HOME }}
@@ -130,6 +130,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$TC" \
             -DOHOS_ARCH=arm64-v8a -DOHOS_STL=c++_static \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_INSTALL_PREFIX="$OHOS_DEPS_HOME/zlib"
           cmake --build zlib-build
           cmake --install zlib-build

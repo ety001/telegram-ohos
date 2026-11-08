@@ -30,7 +30,7 @@ concurrency: { group: build-tdlib, cancel-in-progress: true }
 jobs:
   build:
     runs-on: ubuntu-latest          # 未来可换 [self-hosted, linux, x64]
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       OHOS_SDK_VER: "7.0"
       OHOS_SDK_HOME: ${{ github.workspace }}/ohos-sdk/linux
@@ -105,7 +105,7 @@ jobs:
   - [ ] SDK 直链 3.2GiB 在 runner 的下载耗时与成功率
   - [ ] 解压后 native（≈4~5GB）能否稳定进 actions/cache（repo 配额 10GB，与 ccache 5G 互挤，必要时改缓存 zip）
   - [ ] OpenSSL `linux-aarch64` + NDK target wrapper（`aarch64-unknown-linux-ohos-clang`）交叉构建成功率；首跑人工核对脚本输出的 AArch64 断言与 SONAME 校验日志
-  - [ ] TDLib 全量时长 vs 2vCPU 预估 30~50min（timeout 90min 是否富余）；二次运行 ccache 命中率
+  - [ ] TDLib 全量时长 vs 2vCPU 预估 30~50min（timeout 已调至 120min，首跑实测富余度）；二次运行 ccache 命中率
   - [ ] bot commit 回库链路（GITHUB_TOKEN contents:write + main 分支保护设置）
   - [ ] tag 触发链路（回库步被分支护栏跳过，确认 artifact 留档正常）
   - [ ] td-src 全量 clone 耗时（未缓存，后续可加 actions/cache）
