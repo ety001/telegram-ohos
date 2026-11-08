@@ -12,8 +12,8 @@ todos:
     content: GitHub Actions 编译流水线（PR #3 已 merge；首跑实测通过 21m16s，产物 bot 自动回库，校验全绿）
     status: completed
   - id: m1-napi-bridge
-    content: M1 NAPI 桥（td_json_client 四函数 + 线程安全回调）+ td_execute 连通验证
-    status: pending
+    content: M1 NAPI 桥（四函数 API + TSF 接收线程 + 连通验证 UI；NDK 实编+hvigor 整包双验证；PR #4 已 merge；真机 td_execute 待真机）
+    status: completed
   - id: m2-auth
     content: M2 登录链路（手机号/验证码/2FA + setTdlibParameters 全数据库开启）
     status: pending
