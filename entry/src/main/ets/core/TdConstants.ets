@@ -14,11 +14,26 @@ export class TdReq {
   static readonly TEST_PROXY: string = 'testProxy';
   static readonly CLOSE: string = 'close';
   static readonly GET_VERSION: string = 'getVersion';
+  // 会话列表（1.8.63 schema：getChats/loadChats 无 offset 参数，分页由 loadChats 增量加载）
+  static readonly GET_CHATS: string = 'getChats';
+  static readonly LOAD_CHATS: string = 'loadChats';
+  static readonly GET_CHAT: string = 'getChat';
 }
 
 export class TdUpdate {
   static readonly AUTHORIZATION_STATE: string = 'updateAuthorizationState';
   static readonly OPTION: string = 'updateOption';
+  // 会话列表（TDLib 契约：updateNewChat 保证先于该 chat 出现在 getChats 结果中）
+  static readonly NEW_CHAT: string = 'updateNewChat';
+  static readonly CHAT_POSITION: string = 'updateChatPosition';
+  static readonly CHAT_LAST_MESSAGE: string = 'updateChatLastMessage';
+  static readonly CHAT_READ_INBOX: string = 'updateChatReadInbox';
+  static readonly CHAT_TITLE: string = 'updateChatTitle';
+  static readonly CHAT_PHOTO: string = 'updateChatPhoto';
+  // getChats/searchChats 的结果对象（@type=chats，结果与 update 走同一分发入口）
+  static readonly CHATS: string = 'chats';
+  // getChat 的结果对象（@type=chat，chats 结果缺项时的补拉响应）
+  static readonly CHAT_RESULT: string = 'chat';
 }
 
 export class AuthStateType {
@@ -40,6 +55,28 @@ export class ErrorType {
   static readonly INVALID: string = 'error';
 }
 
+/** ChatList 子类型（chat_position.list['@type']） */
+export class TdChatList {
+  static readonly MAIN: string = 'chatListMain';
+}
+
+/** MessageContent 子类型（last_message.content['@type']，会话列表预览提取用） */
+export class TdMessageContent {
+  static readonly TEXT: string = 'messageText';
+  static readonly PHOTO: string = 'messagePhoto';
+  static readonly VIDEO: string = 'messageVideo';
+  static readonly VIDEO_NOTE: string = 'messageVideoNote';
+  static readonly DOCUMENT: string = 'messageDocument';
+  static readonly VOICE_NOTE: string = 'messageVoiceNote';
+  static readonly ANIMATION: string = 'messageAnimation';
+  static readonly STICKER: string = 'messageSticker';
+  static readonly AUDIO: string = 'messageAudio';
+  static readonly LOCATION: string = 'messageLocation';
+  static readonly CONTACT: string = 'messageContact';
+  static readonly POLL: string = 'messagePoll';
+  static readonly CALL: string = 'messageCall';
+}
+
 /** TDLib 通用字段名 */
 export class TdField {
   static readonly TYPE: string = '@type';
@@ -47,4 +84,23 @@ export class TdField {
   static readonly CLIENT_ID: string = '@client_id';
   static readonly MESSAGE: string = 'message';
   static readonly VERSION: string = 'version';
+  // chat / update 通用字段
+  static readonly ID: string = 'id';
+  static readonly CHAT_ID: string = 'chat_id';
+  static readonly TITLE: string = 'title';
+  static readonly PHOTO: string = 'photo';
+  static readonly CHAT: string = 'chat';
+  static readonly CHAT_LIST: string = 'chat_list';
+  static readonly LIST: string = 'list';
+  static readonly POSITION: string = 'position';
+  static readonly POSITIONS: string = 'positions';
+  static readonly ORDER: string = 'order';
+  static readonly IS_PINNED: string = 'is_pinned';
+  static readonly UNREAD_COUNT: string = 'unread_count';
+  static readonly CHAT_IDS: string = 'chat_ids';
+  static readonly LAST_MESSAGE: string = 'last_message';
+  static readonly DATE: string = 'date';
+  static readonly CONTENT: string = 'content';
+  static readonly TEXT: string = 'text';
+  static readonly LIMIT: string = 'limit';
 }
