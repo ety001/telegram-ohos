@@ -30,8 +30,8 @@ todos:
     content: M3 本地通知（触发规则矩阵 + wantAgent 点击路由；PR #9 已 merge；真机 5 项验证挂账）
     status: completed
   - id: m4-keepalive
-    content: M4 双端后台与保活（PC TASK_KEEPING + 手机长时任务评估 + 限制说明）
-    status: pending
+    content: M4 双端后台与保活（TASK_KEEPING 长时任务 + 生命周期接线；PR #10 已 merge；真机最小化 >24h 实测与手机端 TASK_KEEPING 行为待真机）
+    status: completed
   - id: m5-polish
     content: M5 打磨（emoji 面板、会话搜索、主题、代理设置页、一周稳定性）
     status: pending
