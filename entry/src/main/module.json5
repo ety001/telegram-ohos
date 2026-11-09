@@ -31,6 +31,12 @@
         "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
+        // 长时任务类型声明（M4 保活，KeepAliveService）：taskKeeping = TASK_KEEPING 计算任务。
+        // 官方口径：PC/2in1 免 ACL；手机端（API 21+ 非 PC/2in1）需系统 ACL，申请预期 9800005 被拒
+        //（权衡见 KeepAliveService 文件头与 PLAN M4）。未声明该项时 startBackgroundRunning 必 9800005
+        "backgroundModes": [
+          "taskKeeping"
+        ],
         "exported": true,
         "skills": [
           {
