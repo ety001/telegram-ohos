@@ -102,6 +102,11 @@ export class ChatListStore {
     this.handleChatNotificationSettings(update);
   };
 
+  // 复审 LOW 修复（M5）：同步 chat.last_read_outbox_message_id 存量记录（见 handler 注释）
+  private readonly onChatReadOutbox: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatReadOutbox(update);
+  };
+
   /**
    * 登录就绪后触发（幂等）：挂路由 + 拉首屏。
    * 极端时序（ready 与 start 之间恰好新产生会话导致 updateNewChat 先于注册到达）下
@@ -122,6 +127,7 @@ export class ChatListStore {
     router.register(TdUpdate.CHAT_TITLE, this.onChatTitle);
     router.register(TdUpdate.CHAT_PHOTO, this.onChatPhoto);
     router.register(TdUpdate.CHAT_NOTIFICATION_SETTINGS, this.onChatNotificationSettings);
+    router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
     hilog.info(LOG_DOMAIN, TAG, 'start: request first page, limit=%{public}d', PAGE_SIZE);
     this.requestFirstPage();
   }
@@ -530,6 +536,29 @@ export class ChatListStore {
     }
     chat[TdField.NOTIFICATION_SETTINGS] = settings;
     this.notifyChanged();
+  }
+
+  /**
+   * updateChatReadOutbox（M5 复审 LOW 修复）：把 outbox 已读游标同步进 chat 存量记录。
+   * 背景：MessageStore 缓存被 LRU 淘汰后重建（createCache）以 chat.last_read_outbox_message_id
+   * 为已读游标种子——本仓库此前只在 updateNewChat 全量入库时拿到该字段，缓存存活期间到达的
+   * outbox 推进不会落进本表，淘汰重建后已读双勾会回退到陈旧游标。此处按 max 单调同步，
+   * MessageStore 自身的增量 handler 仍在（双通道，语义一致）。
+   * 列表 UI 不消费该字段：不触发 UI 通知（省一次无意义重建）。
+   */
+  private handleChatReadOutbox(update: Record<string, Object>): void {
+    const chatId: number = this.readChatId(update);
+    if (chatId === 0) {
+      return;
+    }
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return;
+    }
+    const lastRead: number = this.readNumber(update, TdField.LAST_READ_OUTBOX_MESSAGE_ID);
+    if (lastRead > this.readNumber(chat, TdField.LAST_READ_OUTBOX_MESSAGE_ID)) {
+      chat[TdField.LAST_READ_OUTBOX_MESSAGE_ID] = lastRead;
+    }
   }
 
   // ---------------- 排序（chatListMain，(order, chat_id) 降序） ----------------

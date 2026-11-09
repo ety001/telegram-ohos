@@ -54,6 +54,8 @@ export struct ChatPanel {
   @State loadingOlder: boolean = false;
   @State allLoaded: boolean = false;
   @State firstPageReady: boolean = false;
+  /** 首屏/重拉请求在途（M5 空态语义：此时显示「加载中…」而非「暂无消息」） */
+  @State firstPagePending: boolean = false;
   // 全屏媒体覆盖层（图片预览 / 视频播放；bindContentCover 挂根布局）
   @State overlayKind: string = OverlayKind.NONE;
   @State overlayImageSrc: string = '';
@@ -223,11 +225,17 @@ export struct ChatPanel {
     this.overlayKind = OverlayKind.NONE;
   }
 
-  /** 空态：首屏未到（无缓存）或会话确无消息 */
+  /**
+   * 空态（M5 语义修正）：
+   * - 无缓存（activateChat 尚未建缓存）或首屏/重拉在途 →「加载中…」
+   *   （stale 重置清空消息后 hasMore 复位为 true，此前会被误判成「暂无消息」）；
+   * - 缓存就位且已到底（canLoadOlder=false 且无消息）→「暂无消息」；
+   * - 其余（既未到底也无在途请求却无消息——理论不应到达）不显示文案。
+   */
   @Builder
   emptyState() {
     Column() {
-      if (!this.firstPageReady) {
+      if (!this.firstPageReady || this.firstPagePending) {
         Text('加载中…')
           .fontSize(13)
           .fontColor(ChatUi.TEXT_SECONDARY)
@@ -358,6 +366,7 @@ export struct ChatPanel {
     this.loadingOlder = store.isLoadingOlder(this.chatId);
     this.allLoaded = !store.canLoadOlder(this.chatId) && !this.loadingOlder;
     this.firstPageReady = store.hasCache(this.chatId);
+    this.firstPagePending = store.isFirstPagePending(this.chatId);
     store.markViewedUpToLatest(this.chatId);
 
     if (entries.length === 0) {
