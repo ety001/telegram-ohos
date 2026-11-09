@@ -4,6 +4,7 @@
  * 页面只保留顶栏与参数传递，本组件自治消息数据（内部接 MessageStore 单例）。
  * M3-media：buildBubble 媒体投影（MessageContent 提取 + FileDownloadStore 状态种子）+
  * 全屏媒体覆盖层（bindContentCover：图片 pinch 预览 / AVPlayer 视频播放）。
+ * M5：messageText/caption 富文本切片投影（RichText.parse，entities 按 UTF-16 code unit）。
  *
  * 消息流实现选型：
  * - 数组按时间升序渲染（旧→新，新消息在底部），不用 List 反转——ArkUI List 无 reversed 属性，
@@ -21,6 +22,7 @@
 import { MessageStore, MessageStoreObserver } from '../core/MessageStore';
 import { TimeFormat } from '../core/TimeFormat';
 import { TdField, TdMessageContent, TdSendingState } from '../core/TdConstants';
+import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
@@ -392,7 +394,11 @@ export struct ChatPanel {
     bubble.timeText = TimeFormat.formatTime(bubble.dateSeconds);
     bubble.dayKey = TimeFormat.dayKeyOf(bubble.dateSeconds);
     bubble.text = ChatPanel.extractText(message);
+    // M5 富文本：messageText 的 entities 切片 + 样式指纹（气泡重建键用）
+    const content: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.CONTENT]);
+    bubble.segments = ChatPanel.extractSegments(content, TdField.TEXT);
     this.attachMedia(bubble, message);
+    bubble.styleKey = `${RichText.fingerprint(bubble.segments)}_${RichText.fingerprint(bubble.captionSegments)}`;
     const state: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.SENDING_STATE]);
     if (state !== null) {
       const type: Object | undefined = state[TdField.TYPE];
@@ -434,6 +440,8 @@ export struct ChatPanel {
     }
     const files: FileDownloadStore = FileDownloadStore.getInstance();
     bubble.caption = MessageContent.extractCaption(content);
+    // M5 富文本：媒体 caption 同为 formattedText（含 entities），切片供气泡渲染
+    bubble.captionSegments = ChatPanel.extractSegments(content, TdField.CAPTION);
     if (kind === MediaKind.PHOTO) {
       const photo: PhotoInfo | null = MessageContent.extractPhoto(content);
       if (photo !== null && photo.selected !== null) {
@@ -502,7 +510,7 @@ export struct ChatPanel {
     return -1;
   }
 
-  /** messageText 纯文本提取（content.text.text；entities 富文本 M5） */
+  /** messageText 纯文本提取（content.text.text；视图渲染用切片见 extractSegments） */
   private static extractText(message: Record<string, Object>): string {
     const content: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.CONTENT]);
     if (content === null) {
@@ -518,6 +526,23 @@ export struct ChatPanel {
     }
     const text: Object | undefined = formatted[TdField.TEXT];
     return typeof text === 'string' ? text : '';
+  }
+
+  /**
+   * formattedText 富文本切片提取（M5）：
+   * content[field]（messageText 的 text / 媒体的 caption）→ RichText.parse 切片序列；
+   * 非文本类型 / 缺字段 / 空文本返回空数组（气泡走纯 Text 路径）。
+   */
+  private static extractSegments(content: Record<string, Object> | null,
+    field: string): Array<RichSegment> {
+    if (content === null) {
+      return [];
+    }
+    const formatted: Record<string, Object> | null = ChatPanel.asRecord(content[field]);
+    if (formatted === null) {
+      return [];
+    }
+    return RichText.parse(formatted);
   }
 
   private static readNumber(source: Record<string, Object>, field: string): number {
