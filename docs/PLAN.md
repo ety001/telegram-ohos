@@ -33,8 +33,8 @@ todos:
     content: M4 双端后台与保活（TASK_KEEPING 长时任务 + 生命周期接线；PR #10 已 merge；真机最小化 >24h 实测与手机端 TASK_KEEPING 行为待真机）
     status: completed
   - id: m5-polish
-    content: M5 打磨（emoji 面板、会话搜索、主题、代理设置页、一周稳定性）
-    status: pending
+    content: M5 精选打磨（富文本 entities 渲染 + 会话操作菜单置顶/静音/删除 + 遗留 LOW 修复 + 版本 0.2.0；PR #11 已 merge；延后登记：LazyForEach 迁移/emoji 自绘面板/主题切换/URL 指纹窄边界/首屏超时重试——均无真机性能数据前不猜优化）
+    status: completed
 ---
 
 # telegram-ohos 鸿蒙原生 Telegram 客户端开发计划
