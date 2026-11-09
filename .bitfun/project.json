@@ -1,0 +1,112 @@
+{
+  "name": "telegram-ohos",
+  "description": "",
+  "projectType": "hvigor",
+  "uri": {
+    "$type": 1,
+    "data": "file:///storage/Users/currentUser/workspace/telegram-ohos"
+  },
+  "buildTask": "",
+  "extendConfigs": {
+    "sourceSet": [],
+    "build": []
+  },
+  "subProjects": [
+    {
+      "name": "entry",
+      "description": "",
+      "projectType": "hvigor",
+      "uri": {
+        "$type": 1,
+        "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry"
+      },
+      "buildTask": "",
+      "extendConfigs": {
+        "sourceSet": [],
+        "build": []
+      },
+      "subProjects": [],
+      "sourceSet": {
+        "include": {
+          "sourceFiles": [],
+          "resourceFiles": []
+        },
+        "exclude": {
+          "contentFiles": []
+        }
+      },
+      "dependencyProjects": []
+    }
+  ],
+  "sourceSet": {
+    "include": {
+      "sourceFiles": [
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/src/main/cpp"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/src/main/ets"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/src/ohosTest/ets"
+          }
+        }
+      ],
+      "resourceFiles": []
+    },
+    "exclude": {
+      "contentFiles": [
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/oh_modules"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/.hvigor"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/build"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/.cxx"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/.test"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/oh_modules"
+          }
+        },
+        {
+          "url": {
+            "$type": 1,
+            "data": "file:///storage/Users/currentUser/workspace/telegram-ohos/entry/build"
+          }
+        }
+      ]
+    }
+  }
+}
