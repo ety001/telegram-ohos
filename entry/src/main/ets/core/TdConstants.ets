@@ -163,6 +163,10 @@ export class TdField {
   static readonly REVOKE: string = 'revoke';
   static readonly FROM_CACHE: string = 'from_cache';
   static readonly LAST_READ_OUTBOX_MESSAGE_ID: string = 'last_read_outbox_message_id';
+  // 通知免打扰判定（M3-notifications；chat.notification_settings.mute_for，1.8.63 schema：
+  // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
+  static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';
+  static readonly MUTE_FOR: string = 'mute_for';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）
   // 注意：messagePhoto.photo 复用上方 chat.photo 的 PHOTO 常量（同名同值）
   static readonly VIDEO: string = 'video';
