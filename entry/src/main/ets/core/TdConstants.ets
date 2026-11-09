@@ -164,7 +164,7 @@ export class TdField {
   static readonly FROM_CACHE: string = 'from_cache';
   static readonly LAST_READ_OUTBOX_MESSAGE_ID: string = 'last_read_outbox_message_id';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）
-  static readonly PHOTO: string = 'photo';
+  // 注意：messagePhoto.photo 复用上方 chat.photo 的 PHOTO 常量（同名同值）
   static readonly VIDEO: string = 'video';
   static readonly DOCUMENT: string = 'document';
   static readonly VOICE_NOTE: string = 'voice_note';

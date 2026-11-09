@@ -254,13 +254,6 @@ export class MessageContent {
     return MessageContent.readString(formatted, TdField.TEXT);
   }
 
-  /** minithumbnail 裸 base64 → Image 可用的 data URI（JPEG；TDLib 固定 JPEG 格式） */
-  static miniDataUri(content: Record<string, Object>, field: string): string {
-    const mini: Record<string, Object> | null = MessageContent.asRecord(content[field]);
-    const data: string = MessageContent.miniDataOf(mini === null ? undefined : mini);
-    return data.length > 0 ? `data:image/jpeg;base64,${data}` : '';
-  }
-
   /** 字节数格式化（自写）：B / KB / MB / GB，保留 1 位小数（≥100 整数位足够时省小数） */
   static formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) {

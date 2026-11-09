@@ -2,6 +2,8 @@
  * 聊天区可嵌入组件（M3，PLAN §4 组件化）：
  * md/lg 断点由 Index 聊天区内嵌，sm 断点由 ChatPage 内嵌——同一份消息流 + 输入区三形态复用。
  * 页面只保留顶栏与参数传递，本组件自治消息数据（内部接 MessageStore 单例）。
+ * M3-media：buildBubble 媒体投影（MessageContent 提取 + FileDownloadStore 状态种子）+
+ * 全屏媒体覆盖层（bindContentCover：图片 pinch 预览 / AVPlayer 视频播放）。
  *
  * 消息流实现选型：
  * - 数组按时间升序渲染（旧→新，新消息在底部），不用 List 反转——ArkUI List 无 reversed 属性，
@@ -21,6 +23,16 @@ import { TimeFormat } from '../core/TimeFormat';
 import { TdField, TdMessageContent, TdSendingState } from '../core/TdConstants';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
+import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
+import { FileDownloadStore } from '../core/FileDownloadStore';
+import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
+
+/** 全屏媒体覆盖层类型（'' = 关闭） */
+class OverlayKind {
+  static readonly NONE: string = '';
+  static readonly PHOTO: string = 'photo';
+  static readonly VIDEO: string = 'video';
+}
 
 /** 消息流条目：分组头 / 气泡（单类 + isHeader 区分，规避 ArkTS 联合类型限制） */
 class ChatEntryModel {
@@ -39,6 +51,11 @@ export struct ChatPanel {
   @State loadingOlder: boolean = false;
   @State allLoaded: boolean = false;
   @State firstPageReady: boolean = false;
+  // 全屏媒体覆盖层（图片预览 / 视频播放；bindContentCover 挂根布局）
+  @State overlayKind: string = OverlayKind.NONE;
+  @State overlayImageSrc: string = '';
+  @State overlayVideoPath: string = '';
+  @State overlayVideoTitle: string = '';
   private scroller: Scroller = new Scroller();
   /** 已 activate 的会话 id（@Watch 换会话时先 deactivate，@Watch 回调不提供旧值故自记） */
   private activatedChatId: number = 0;
@@ -107,6 +124,12 @@ export struct ChatPanel {
                   model: entry.bubble,
                   onRetry: (messageId: number): void => {
                     this.retryMessage(messageId);
+                  },
+                  onPhotoOpen: (src: string): void => {
+                    this.openPhotoPreview(src);
+                  },
+                  onVideoOpen: (localPath: string, title: string): void => {
+                    this.openVideoPlayer(localPath, title);
                   }
                 })
               }
@@ -133,6 +156,56 @@ export struct ChatPanel {
     .width('100%')
     .layoutWeight(1)
     .backgroundColor(ChatUi.CHAT_BG)
+    // 全屏媒体覆盖层：图片 pinch 预览 / AVPlayer 播放（三断点同一份，随组件三形态复用）
+    .bindContentCover(this.overlayKind !== OverlayKind.NONE, this.mediaOverlayBuilder(), {
+      modalTransition: ModalTransition.DEFAULT,
+      onWillDismiss: (action: DismissContentCoverAction): void => {
+        this.closeOverlay();
+        action.dismiss();
+      }
+    })
+  }
+
+  /** 全屏媒体覆盖层内容（photo：pinch 缩放预览 / video：XComponent + AVPlayer） */
+  @Builder
+  mediaOverlayBuilder() {
+    if (this.overlayKind === OverlayKind.PHOTO) {
+      PhotoPreview({
+        src: this.overlayImageSrc,
+        onClose: (): void => {
+          this.closeOverlay();
+        }
+      })
+    } else if (this.overlayKind === OverlayKind.VIDEO) {
+      VideoPlayCover({
+        path: this.overlayVideoPath,
+        title: this.overlayVideoTitle,
+        onClose: (): void => {
+          this.closeOverlay();
+        }
+      })
+    }
+  }
+
+  private openPhotoPreview(src: string): void {
+    if (src.length === 0) {
+      return;
+    }
+    this.overlayImageSrc = src;
+    this.overlayKind = OverlayKind.PHOTO;
+  }
+
+  private openVideoPlayer(localPath: string, title: string): void {
+    if (localPath.length === 0) {
+      return;
+    }
+    this.overlayVideoPath = localPath;
+    this.overlayVideoTitle = title.length > 0 ? title : '视频';
+    this.overlayKind = OverlayKind.VIDEO;
+  }
+
+  private closeOverlay(): void {
+    this.overlayKind = OverlayKind.NONE;
   }
 
   /** 空态：首屏未到（无缓存）或会话确无消息 */
@@ -296,7 +369,7 @@ export struct ChatPanel {
     }, 0);
   }
 
-  /** TDLib message → 气泡视图模型（原对象不变更，纯投影） */
+  /** TDLib message → 气泡视图模型（原对象不变更，纯投影；媒体分支经 MessageContent 提取） */
   private buildBubble(message: Record<string, Object>): MessageBubbleModel {
     const store: MessageStore = MessageStore.getInstance();
     const bubble: MessageBubbleModel = new MessageBubbleModel();
@@ -306,6 +379,7 @@ export struct ChatPanel {
     bubble.timeText = TimeFormat.formatTime(bubble.dateSeconds);
     bubble.dayKey = TimeFormat.dayKeyOf(bubble.dateSeconds);
     bubble.text = ChatPanel.extractText(message);
+    this.attachMedia(bubble, message);
     const state: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.SENDING_STATE]);
     if (state !== null) {
       const type: Object | undefined = state[TdField.TYPE];
@@ -328,6 +402,75 @@ export struct ChatPanel {
       bubble.isRead = store.isOutgoingRead(this.chatId, bubble.messageId);
     }
     return bubble;
+  }
+
+  /**
+   * 媒体投影：content → mediaKind + 展示字段（photo 选中档 / video 封面 / document 文件信息 /
+   * 语音·动图·贴纸占位）。同时把 content 携带的 file 对象种入 FileDownloadStore
+   * （TDLib 自动下载进行中 / 历史缓存已完成的场景，后续 updateFile 无缝接续）。
+   * 提取失败（缺 file/尺寸）一律降级为占位文案——占位不崩溃。
+   */
+  private attachMedia(bubble: MessageBubbleModel, message: Record<string, Object>): void {
+    const content: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.CONTENT]);
+    if (content === null) {
+      return;
+    }
+    const kind: string = MessageContent.mediaKindOf(content);
+    if (kind === MediaKind.NONE) {
+      return; // 文本/未知：原路径
+    }
+    const files: FileDownloadStore = FileDownloadStore.getInstance();
+    bubble.caption = MessageContent.extractCaption(content);
+    if (kind === MediaKind.PHOTO) {
+      const photo: PhotoInfo | null = MessageContent.extractPhoto(content);
+      if (photo !== null && photo.selected !== null) {
+        bubble.mediaKind = kind;
+        bubble.photoFileId = photo.selected.fileId;
+        bubble.photoWidth = photo.selected.width;
+        bubble.photoHeight = photo.selected.height;
+        bubble.photoMini = photo.miniData.length > 0 ? `data:image/jpeg;base64,${photo.miniData}` : '';
+        files.trackFile(photo.selected.file);
+      } else {
+        bubble.placeholder = '[图片]';
+      }
+    } else if (kind === MediaKind.VIDEO) {
+      const video: VideoInfo | null = MessageContent.extractVideo(content);
+      if (video !== null) {
+        bubble.mediaKind = kind;
+        bubble.videoFileId = video.fileId;
+        bubble.videoFileName = video.fileName;
+        bubble.videoDurationText = MessageContent.formatDuration(video.durationSeconds);
+        bubble.videoThumbFileId = video.thumbFileId;
+        bubble.videoThumbWidth = video.thumbWidth;
+        bubble.videoThumbHeight = video.thumbHeight;
+        bubble.videoMini = video.miniData.length > 0 ? `data:image/jpeg;base64,${video.miniData}` : '';
+        files.trackFile(video.videoFile);
+        files.trackFile(video.thumbFile);
+      } else {
+        bubble.placeholder = '[视频]';
+      }
+    } else if (kind === MediaKind.DOCUMENT) {
+      const doc: DocumentInfo | null = MessageContent.extractDocument(content);
+      if (doc !== null) {
+        bubble.mediaKind = kind;
+        bubble.docFileId = doc.fileId;
+        bubble.docFileName = doc.fileName;
+        bubble.docSizeText = MessageContent.formatBytes(doc.sizeBytes);
+        files.trackFile(doc.docFile);
+      } else {
+        bubble.placeholder = '[文件]';
+      }
+    } else if (kind === MediaKind.VOICE) {
+      const voice: VoiceInfo | null = MessageContent.extractVoice(content);
+      const duration: string = voice === null ? '' : MessageContent.formatDuration(voice.durationSeconds);
+      bubble.placeholder = duration.length > 0 ? `[语音] ${duration}` : '[语音]';
+    } else if (kind === MediaKind.ANIMATION) {
+      bubble.placeholder = '[动图]';
+    } else if (kind === MediaKind.STICKER) {
+      bubble.placeholder = '[贴纸]';
+    } else if (kind === MediaKind.AUDIO) {
+      bubble.placeholder = '[音频]';
+    }
   }
 
   private indexOfKey(entries: Array<ChatEntryModel>, key: string): number {
