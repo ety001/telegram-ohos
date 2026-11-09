@@ -41,6 +41,8 @@ export class DownloadPriority {
 
 /** 下载条目状态 */
 export class DownloadState {
+  /** 已入表但未发起下载也非 TDLib 进行中（trackFile 种子且 local 未激活） */
+  static readonly IDLE: string = 'idle';
   static readonly ACTIVE: string = 'active';
   static readonly READY: string = 'ready';
   static readonly FAILED: string = 'failed';
@@ -114,10 +116,17 @@ export class FileDownloadStore {
       return;
     }
     const existing: DownloadEntry | undefined = this.entries.get(fileId);
-    if (existing !== undefined && existing.state !== DownloadState.FAILED) {
-      return; // active 合并 / ready 复用；failed 允许重发
+    if (existing !== undefined && existing.state === DownloadState.ACTIVE) {
+      return; // 进行中：合并（TDLib 侧同 file_id 请求天然去重）
+    }
+    if (existing !== undefined && existing.state === DownloadState.READY) {
+      return; // 已完成：复用缓存
     }
     this.ensureEntry(fileId);
+    const entry: DownloadEntry | undefined = this.entries.get(fileId);
+    if (entry !== undefined) {
+      entry.state = DownloadState.ACTIVE; // 请求已发出（IDLE/FAILED 允许重发）
+    }
     this.seq += 1;
     const extra: string = `downloadFile_${this.seq}`;
     TdUpdateRouter.getInstance().waitForExtra(extra, DOWNLOAD_RESPONSE_TIMEOUT_MS)
@@ -219,12 +228,12 @@ export class FileDownloadStore {
 
   // ---------------- 状态机 ----------------
 
-  /** 新建条目（active 未知进度）；已存在返回 false 且不覆盖现状态 */
+  /** 新建条目（默认 IDLE；downloadFile 路径随即转 ACTIVE）；已存在返回 false 且不覆盖现状态 */
   private ensureEntry(fileId: number): boolean {
     if (this.entries.has(fileId)) {
       return false;
     }
-    const entry: DownloadEntry = { fileId: fileId, state: DownloadState.ACTIVE, progress: -1, path: '' };
+    const entry: DownloadEntry = { fileId: fileId, state: DownloadState.IDLE, progress: -1, path: '' };
     this.entries.set(fileId, entry);
     return true;
   }
@@ -266,14 +275,21 @@ export class FileDownloadStore {
     }
     const stateChanged: boolean = active !== (entry.state === DownloadState.ACTIVE);
     const progressChanged: boolean = progress !== entry.progress;
+    let demoted: boolean = false;
     if (active) {
       entry.state = DownloadState.ACTIVE;
     } else if (entry.state === DownloadState.FAILED) {
       // 保持 failed（等待用户侧重发 downloadFile）
+    } else if (entry.state === DownloadState.READY) {
+      // 曾 ready 但本地副本已不可读（TDLib 清缓存/删文件）：降级回 IDLE，UI 回落缩略图
+      entry.state = DownloadState.IDLE;
+      entry.path = '';
+      entry.progress = -1;
+      demoted = true;
     }
     // 非 active 非 completed 非 failed：TDLib 侧下载被取消/尚未开始，保留现进度等下一次驱动
     entry.progress = progress >= 0 ? progress : entry.progress;
-    if (stateChanged || progressChanged) {
+    if (stateChanged || progressChanged || demoted) {
       this.notify(fileId);
     }
   }
