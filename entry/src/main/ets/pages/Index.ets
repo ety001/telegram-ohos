@@ -18,6 +18,7 @@ import { AuthService, AppAuthState, AuthStateObserver } from '../core/AuthServic
 import { AuthStateType } from '../core/TdConstants';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { MessageStore } from '../core/MessageStore';
+import { FileDownloadStore } from '../core/FileDownloadStore';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
@@ -129,9 +130,11 @@ struct Index {
     if (appState === AppAuthState.READY) {
       ChatListStore.getInstance().start();
       MessageStore.getInstance().start();
+      FileDownloadStore.getInstance().start();
     } else {
       ChatListStore.getInstance().reset();
       MessageStore.getInstance().reset();
+      FileDownloadStore.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
     }
