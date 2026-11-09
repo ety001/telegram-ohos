@@ -1,5 +1,10 @@
 {
   "src": [
-    "pages/Index"
+    "pages/Index",
+    "pages/CredentialsPage",
+    "pages/LoginPage",
+    "pages/VerifyCodePage",
+    "pages/PasswordPage",
+    "pages/ProxyPage"
   ]
 }
