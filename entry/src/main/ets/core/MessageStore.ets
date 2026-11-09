@@ -71,6 +71,8 @@ interface ChatMessageCache {
   lastReadOutboxId: number;
   /** 已上报 viewMessages 的最大正数 id（避免重复上报） */
   lastViewedMaxId: number;
+  /** 会话关闭期停更标记（supergroup/channel）：重激活时缓存不可信，丢弃重拉（M2 复审修复） */
+  stale: boolean;
 }
 
 /** 发送在途登记：@extra → 本地占位（响应到达后占位 → TDLib 临时消息） */
@@ -197,16 +199,23 @@ export class MessageStore {
     hilog.info(LOG_DOMAIN, TAG, 'started');
   }
 
-  /** 登出/会话结束（authState 离开 ready）后重置；已清空时为无副作用空操作 */
+  /** 登出/会话结束（authState 离开 ready）后重置；通知观察者清空 UI（防登录页返回键回看旧消息） */
   reset(): void {
     if (!this.started && this.caches.size === 0) {
       return;
+    }
+    const affected: Array<number> = this.recentChatIds.slice();
+    if (this.activeChatId !== 0 && !affected.includes(this.activeChatId)) {
+      affected.push(this.activeChatId);
     }
     this.caches.clear();
     this.recentChatIds = [];
     this.pendingSends.clear();
     this.activeChatId = 0;
     this.started = false;
+    for (const chatId of affected) {
+      this.notifyChanged(chatId);
+    }
     hilog.info(LOG_DOMAIN, TAG, 'reset for next login');
   }
 
@@ -222,6 +231,14 @@ export class MessageStore {
     let cache: ChatMessageCache | undefined = this.caches.get(chatId);
     if (cache === undefined) {
       cache = this.createCache(chatId);
+    }
+    if (cache.stale) {
+      // supergroup/channel 关闭期停更：缓存不可信（有缺口+删除残留），丢弃重拉
+      // （M2 复审 MEDIUM 修复：只增合并无法自愈 >1 页缺口与删除残留）
+      cache.messages = [];
+      cache.oldestLoadedId = 0;
+      cache.hasMore = true;
+      cache.stale = false;
     }
     // openChat：supergroup/channel 的消息更新仅对已打开会话下发（td_api.tl openChat 注释）
     // 注：对象字面量键须为字符串字面量（ArkTS arkts-identifiers-as-prop-names，沿 M2 风格），
@@ -242,6 +259,23 @@ export class MessageStore {
       return;
     }
     this.activeChatId = 0;
+    // supergroup/channel 关闭后更新停发，缓存将不再自愈——标 stale，重激活时丢弃重拉
+    const chat: Record<string, Object> | undefined =
+      ChatListStore.getInstance().getChat(chatId);
+    if (chat !== undefined) {
+      const typeObj: Object | undefined = chat['type'];
+      if (typeof typeObj === 'object' && typeObj !== null) {
+        const type = typeObj as Record<string, Object>;
+        const tObj: Object | undefined = type['@type'];
+        const t: string = typeof tObj === 'string' ? tObj as string : '';
+        if (t === 'chatTypeSupergroup') {
+          const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+          if (cache !== undefined) {
+            cache.stale = true;
+          }
+        }
+      }
+    }
     TdClient.getInstance().send({ ['@type']: TdReq.CLOSE_CHAT, 'chat_id': chatId });
   }
 
@@ -250,6 +284,11 @@ export class MessageStore {
   getMessages(chatId: number): Array<Record<string, Object>> {
     const cache: ChatMessageCache | undefined = this.caches.get(chatId);
     return cache === undefined ? new Array<Record<string, Object>>() : cache.messages;
+  }
+
+  /** 首屏是否已就位（UI 区分「加载中」与「暂无消息」空态用） */
+  hasCache(chatId: number): boolean {
+    return this.caches.has(chatId);
   }
 
   canLoadOlder(chatId: number): boolean {
@@ -285,7 +324,9 @@ export class MessageStore {
 
   /**
    * 上报已读：取缓存内最新的 ≤20 条正数 id 发 viewMessages（source=messageSourceChatHistory）。
-   * 会话已 openChat，故 force_read=false 即可标记已读；无新增（≤上次上报游标）时跳过。
+   * 已读判定：TDLib need_read = force_read || is_dialog_history（MessagesManager 实现），
+   * 即 dialog history 来源本身即触发已读，与 openChat 无关；force_read 的语义是
+   * 「会话关闭时也强制置已读」。无新增（≤上次上报游标）时跳过。
    */
   markViewedUpToLatest(chatId: number): void {
     const cache: ChatMessageCache | undefined = this.caches.get(chatId);
@@ -356,9 +397,15 @@ export class MessageStore {
           if (msg.toLowerCase().includes(ALL_LOADED_ERROR)) {
             cache.hasMore = false;
           } else {
-            // 其余错误（参数/权限）：按到底处理，避免死循环重试；错误文案不打日志（可能含会话上下文）
-            cache.hasMore = false;
-            hilog.warn(LOG_DOMAIN, TAG, 'getChatHistory rejected: chat=%{public}s', `${chatId}`);
+            // 瞬时错误不熔断（保留 hasMore 可重试）；仅确定性到底/权限类错误判到底
+            // 错误文案不打日志（可能含会话上下文）
+            const permanent: boolean = msg.toLowerCase().includes('not found') ||
+              msg.toLowerCase().includes('access');
+            if (permanent) {
+              cache.hasMore = false;
+            }
+            hilog.warn(LOG_DOMAIN, TAG, 'getChatHistory rejected: chat=%{public}s permanent=%{public}s',
+              `${chatId}`, `${permanent}`);
           }
           this.notifyChanged(chatId);
           return;
@@ -608,7 +655,8 @@ export class MessageStore {
       initialRequested: false,
       loadingOlder: false,
       lastReadOutboxId: 0,
-      lastViewedMaxId: 0
+      lastViewedMaxId: 0,
+      stale: false
     };
     // 已读回执初值取 chat 对象存量游标（随后由 updateChatReadOutbox 增量推进）
     const chat: Record<string, Object> | undefined = ChatListStore.getInstance().getChat(chatId);

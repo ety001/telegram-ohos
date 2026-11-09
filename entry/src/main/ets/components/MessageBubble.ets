@@ -27,7 +27,8 @@ export class MessageBubbleModel {
 
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
-    return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text.length}_${this.errorText.length}`;
+    // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）
+    return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}`;
   }
 }
 

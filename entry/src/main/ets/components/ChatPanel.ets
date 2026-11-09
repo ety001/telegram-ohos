@@ -38,6 +38,7 @@ export struct ChatPanel {
   @State inputText: string = '';
   @State loadingOlder: boolean = false;
   @State allLoaded: boolean = false;
+  @State firstPageReady: boolean = false;
   private scroller: Scroller = new Scroller();
   /** 已 activate 的会话 id（@Watch 换会话时先 deactivate，@Watch 回调不提供旧值故自记） */
   private activatedChatId: number = 0;
@@ -117,6 +118,9 @@ export struct ChatPanel {
         .scrollBar(BarState.Off)
         .edgeEffect(EdgeEffect.None)
         .cachedCount(8)
+        // 官方聊天流方案（API 19+）：初始布局对齐末项、内容不足一屏底部对齐、
+        // 插入条目时上方内容上移——头部插入锚定/新消息跟底由其接管（M3 复审修复）
+        .stackFromEnd(true)
         .onReachStart((): void => {
           this.loadOlder();
         })
@@ -135,10 +139,17 @@ export struct ChatPanel {
   @Builder
   emptyState() {
     Column() {
-      Text(this.allLoaded ? '暂无消息' : '加载中…')
-        .fontSize(13)
-        .fontColor(ChatUi.TEXT_SECONDARY)
-        .opacity(0.7)
+      if (!this.firstPageReady) {
+        Text('加载中…')
+          .fontSize(13)
+          .fontColor(ChatUi.TEXT_SECONDARY)
+          .opacity(0.7)
+      } else if (this.allLoaded) {
+        Text('暂无消息')
+          .fontSize(13)
+          .fontColor(ChatUi.TEXT_SECONDARY)
+          .opacity(0.7)
+      }
     }
     .width('100%')
     .layoutWeight(1)
@@ -179,7 +190,9 @@ export struct ChatPanel {
         .onChange((value: string): void => {
           this.inputText = value;
         })
-        .onSubmit((enterKey: EnterKeyType): void => {
+        .onSubmit((enterKey: EnterKeyType, event: SubmitEvent): void => {
+          // 聊天连续输入：回车发送后保持输入框可编辑状态（键盘不收起；本 SDK 用 keepEditableState）
+          event.keepEditableState();
           this.sendCurrent();
         })
       Text('发送')
@@ -256,31 +269,24 @@ export struct ChatPanel {
     this.entries = entries;
     this.loadingOlder = store.isLoadingOlder(this.chatId);
     this.allLoaded = !store.canLoadOlder(this.chatId) && !this.loadingOlder;
+    this.firstPageReady = store.hasCache(this.chatId);
     store.markViewedUpToLatest(this.chatId);
 
     if (entries.length === 0) {
       this.positioned = false;
       return;
     }
-    const lastKey: string = entries[entries.length - 1].key;
     if (!this.positioned) {
       this.positioned = true;
       this.scrollAfterRender(entries.length - 1, ScrollAlign.END);
       return;
     }
+    const lastKey: string = entries[entries.length - 1].key;
     if (lastKey !== previousLastKey) {
-      // 底部有新消息（收/发）：跟底（用户主动上翻阅读时强行跟底为 M3 取舍，M5 改「回到底部」浮标）
+      // 底部有新消息（收/发）：stackFromEnd 自动维持视口，此处兜底跟底
       this.scrollAfterRender(entries.length - 1, ScrollAlign.END);
-      return;
     }
-    if (previousFirstKey.length > 0 && entries[0].key !== previousFirstKey) {
-      // 头部插入（上翻页到达）：锚定原首可见条目，防止视口跳到底部/顶部
-      const anchorIndex: number = this.indexOfKey(entries, previousFirstKey);
-      if (anchorIndex > 0) {
-        const target: number = anchorIndex + this.firstVisibleIndex;
-        this.scrollAfterRender(target > entries.length - 1 ? entries.length - 1 : target, ScrollAlign.START);
-      }
-    }
+    // 头部插入（上翻页到达）的视口稳定由 stackFromEnd 接管，不再手工锚定补偿
   }
 
   /** 滚动定位须在 @State 渲染提交后执行（同步调用会被旧布局吞掉/钳制），延迟到下一宏任务 */
