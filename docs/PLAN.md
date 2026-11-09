@@ -24,8 +24,8 @@ todos:
     content: M3 消息收发（乐观 UI 三态 + ChatPanel 组件化 + 已读回执；PR #7 已 merge；真机端到端收发待真机）
     status: completed
   - id: m3-media
-    content: M3 媒体（图片/视频预览、文件下载与保存到用户目录）
-    status: pending
+    content: M3 媒体与文件（图片/视频/文件渲染下载 + AVPlayer 播放 + 用户目录保存；PR #8 已 merge；真机媒体 7 项验证挂账）
+    status: completed
   - id: m3-notifications
     content: M3 本地通知（notificationManager + 通知点击路由到会话）
     status: pending
