@@ -27,8 +27,8 @@ todos:
     content: M3 媒体与文件（图片/视频/文件渲染下载 + AVPlayer 播放 + 用户目录保存；PR #8 已 merge；真机媒体 7 项验证挂账）
     status: completed
   - id: m3-notifications
-    content: M3 本地通知（notificationManager + 通知点击路由到会话）
-    status: pending
+    content: M3 本地通知（触发规则矩阵 + wantAgent 点击路由；PR #9 已 merge；真机 5 项验证挂账）
+    status: completed
   - id: m4-keepalive
     content: M4 双端后台与保活（PC TASK_KEEPING + 手机长时任务评估 + 限制说明）
     status: pending
