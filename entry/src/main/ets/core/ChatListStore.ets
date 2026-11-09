@@ -20,7 +20,7 @@
  */
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TdClient } from '../tdlib/TdClient';
-import { TdUpdateRouter } from './TdUpdateRouter';
+import { TdUpdateRouter, TdRouteHandler } from './TdUpdateRouter';
 import { TdReq, TdUpdate, TdField, TdChatList, ErrorType } from './TdConstants';
 
 const TAG: string = 'ChatListStore';
@@ -62,6 +62,40 @@ export class ChatListStore {
 
   // ---------------- 生命周期 ----------------
 
+  // 路由 handler 提为成员：重登录（reset→start）后重复 register 由 Router 去重，防双重分发
+  private readonly onNewChat: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.upsertChat(this.readRecord(update, TdField.CHAT));
+  };
+
+  // getChat 的响应对象（防御路径：chats 结果引用了未收到的 chat 时逐个补拉）
+  private readonly onChatResult: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.upsertChat(update);
+  };
+
+  private readonly onChatsResult: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatsResult(update);
+  };
+
+  private readonly onChatPosition: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatPosition(update);
+  };
+
+  private readonly onChatLastMessage: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatLastMessage(update);
+  };
+
+  private readonly onChatReadInbox: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatReadInbox(update);
+  };
+
+  private readonly onChatTitle: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatTitle(update);
+  };
+
+  private readonly onChatPhoto: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatPhoto(update);
+  };
+
   /**
    * 登录就绪后触发（幂等）：挂路由 + 拉首屏。
    * 极端时序（ready 与 start 之间恰好新产生会话导致 updateNewChat 先于注册到达）下
@@ -73,31 +107,14 @@ export class ChatListStore {
     }
     this.started = true;
     const router: TdUpdateRouter = TdUpdateRouter.getInstance();
-    router.register(TdUpdate.NEW_CHAT, (update: Record<string, Object>): void => {
-      this.upsertChat(this.readRecord(update, TdField.CHAT));
-    });
-    // getChat 的响应对象（防御路径：chats 结果引用了未收到的 chat 时逐个补拉）
-    router.register(TdUpdate.CHAT_RESULT, (update: Record<string, Object>): void => {
-      this.upsertChat(update);
-    });
-    router.register(TdUpdate.CHATS, (update: Record<string, Object>): void => {
-      this.handleChatsResult(update);
-    });
-    router.register(TdUpdate.CHAT_POSITION, (update: Record<string, Object>): void => {
-      this.handleChatPosition(update);
-    });
-    router.register(TdUpdate.CHAT_LAST_MESSAGE, (update: Record<string, Object>): void => {
-      this.handleChatLastMessage(update);
-    });
-    router.register(TdUpdate.CHAT_READ_INBOX, (update: Record<string, Object>): void => {
-      this.handleChatReadInbox(update);
-    });
-    router.register(TdUpdate.CHAT_TITLE, (update: Record<string, Object>): void => {
-      this.handleChatTitle(update);
-    });
-    router.register(TdUpdate.CHAT_PHOTO, (update: Record<string, Object>): void => {
-      this.handleChatPhoto(update);
-    });
+    router.register(TdUpdate.NEW_CHAT, this.onNewChat);
+    router.register(TdUpdate.CHAT_RESULT, this.onChatResult);
+    router.register(TdUpdate.CHATS, this.onChatsResult);
+    router.register(TdUpdate.CHAT_POSITION, this.onChatPosition);
+    router.register(TdUpdate.CHAT_LAST_MESSAGE, this.onChatLastMessage);
+    router.register(TdUpdate.CHAT_READ_INBOX, this.onChatReadInbox);
+    router.register(TdUpdate.CHAT_TITLE, this.onChatTitle);
+    router.register(TdUpdate.CHAT_PHOTO, this.onChatPhoto);
     hilog.info(LOG_DOMAIN, TAG, 'start: request first page, limit=%{public}d', PAGE_SIZE);
     this.requestFirstPage();
   }

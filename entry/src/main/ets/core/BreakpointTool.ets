@@ -87,9 +87,15 @@ export class BreakpointTool {
     if (!(widthPx > 0)) {
       return;
     }
-    let density: number = display.getDefaultDisplaySync().densityPixels;
-    if (!(density > 0)) {
-      density = 1;
+    // 该方法同时被 windowSizeChange 回调调用：display 读取可能抛错，须自捕获防断链
+    let density: number = 1;
+    try {
+      const pixelsPerVp: number = display.getDefaultDisplaySync().densityPixels;
+      if (pixelsPerVp > 0) {
+        density = pixelsPerVp;
+      }
+    } catch (err) {
+      hilog.warn(LOG_DOMAIN, TAG, 'read display failed: %{private}s', JSON.stringify(err));
     }
     const widthVp: number = widthPx / density;
     let next: string = Breakpoint.LG;
