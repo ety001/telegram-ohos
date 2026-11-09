@@ -21,8 +21,8 @@ todos:
     content: M2 会话列表 + 响应式地基（PR #6 已 merge；断点 sm/md/lg、三形态 deviceTypes、ChatPage 占位；真实数据一致性/帧率/断点切换待真机）
     status: completed
   - id: m3-messaging
-    content: M3 消息收发（sendMessage + 消息列表渲染 + 已读回执）
-    status: pending
+    content: M3 消息收发（乐观 UI 三态 + ChatPanel 组件化 + 已读回执；PR #7 已 merge；真机端到端收发待真机）
+    status: completed
   - id: m3-media
     content: M3 媒体（图片/视频预览、文件下载与保存到用户目录）
     status: pending
