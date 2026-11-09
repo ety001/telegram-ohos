@@ -21,3 +21,6 @@ local/
 # 系统
 .DS_Store
 entry/oh-package-lock.json5
+
+# 调试日志导出（临时产物不入库）
+logs/
