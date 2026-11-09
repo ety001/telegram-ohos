@@ -25,6 +25,7 @@ import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
+import { NotificationService } from '../core/NotificationService';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -77,6 +78,8 @@ export struct ChatPanel {
     MessageStore.getInstance().removeObserver(this.storeObserver);
     if (this.activatedChatId !== 0) {
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
+      // 通知触发规则接线：组件销毁后该会话不再视为「用户正在看」（新消息恢复通知）
+      NotificationService.getInstance().setActiveChat(0);
       this.activatedChatId = 0;
     }
   }
@@ -94,6 +97,9 @@ export struct ChatPanel {
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
     }
     this.activatedChatId = this.chatId;
+    // 通知触发规则接线（md/lg 选中变化 / sm ChatPage 推入弹出同一入口）：
+    // 更新「正被查看的会话」，切到即撤该会话未读通知（已读）
+    NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
     if (this.chatId !== 0) {
