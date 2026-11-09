@@ -15,8 +15,8 @@ todos:
     content: M1 NAPI 桥（四函数 API + TSF 接收线程 + 连通验证 UI；NDK 实编+hvigor 整包双验证；PR #4 已 merge；真机 td_execute 待真机）
     status: completed
   - id: m2-auth
-    content: M2 登录链路（手机号/验证码/2FA + setTdlibParameters 全数据库开启）
-    status: pending
+    content: M2 登录链路（状态机/凭证/代理/流程页 + 分发框架；PR #5 已 merge；真机端到端登录待真机+代理实操）
+    status: completed
   - id: m2-chat-list
     content: M2 会话列表（LazyForEach + getChats + 更新流分发）+ 响应式地基（断点/组件化/deviceTypes 扩展三形态）
     status: pending
