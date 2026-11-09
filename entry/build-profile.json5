@@ -2,6 +2,8 @@
   "apiType": "stageMode",
   "buildOption": {
     // NAPI 桥（libtdnapi.so）：C++ 工程入口。独立实编验证走 scripts/build-napi-bridge.sh
+    // 注意：libs/ 仅含 arm64-v8a 产物，CMakeLists 硬链同架构库（hvigor 默认即单 arm64-v8a，
+    // 本版本 schema 无 abiFilters 字段；若工具链默认 ABI 集变化会在打包期 fail-loud）
     "externalNativeOptions": {
       "path": "./src/main/cpp/CMakeLists.txt",
       "arguments": "",
