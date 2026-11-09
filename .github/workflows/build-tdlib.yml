@@ -2,7 +2,7 @@
 # 方案与骨架：docs/CI-RESEARCH.md §三；落地状态与骨架差异：§七
 #
 # 触发：手动 workflow_dispatch（可输入 sdk_version，默认 7.0）或 push tag tdlib-v*
-# 回库：产物以 github-actions[bot] 身份 commit 到 main（仅 main 分支触发的构建回库，
+# 回库：产物以 github-actions[bot] 身份 commit 到 master（仅 master 分支触发的构建回库，
 #       见回库步分支护栏），[skip ci] 防递归触发
 name: build-tdlib
 
@@ -171,10 +171,10 @@ jobs:
             --zlib-root "$OHOS_DEPS_HOME/zlib" \
             --out out/
 
-      # 回库护栏：仅 main 分支触发的构建回库——防误从其它分支 dispatch 把未合并树推上 main；
+      # 回库护栏：仅 master 分支触发的构建回库——防误从其它分支 dispatch 把未合并树推上 master；
       # tag 触发（refs/tags/tdlib-v*）跳过回库，产物走下方 artifact 留档
       - name: 产物回库（github-actions[bot]）
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/master'
         run: |
           cp out/libtdjson.so libs/arm64-v8a/libtdjson.so
           cp out/SHA256SUMS libs/arm64-v8a/SHA256SUMS
@@ -186,8 +186,8 @@ jobs:
             exit 0
           fi
           git commit -m "chore(tdlib): 重编 libtdjson.so [skip ci]"
-          # 固定回 main：push 目标写死 HEAD:main，非 FF 会被服务端拒绝（护栏兜底，属预期失败）
-          git push origin HEAD:main
+          # 固定回 master：push 目标写死 HEAD:master，非 FF 会被服务端拒绝（护栏兜底，属预期失败）
+          git push origin HEAD:master
 
       # !cancelled()：回库失败/被护栏跳过时，产物仍留档可手动取回
       - name: 产物留档（7 天）
