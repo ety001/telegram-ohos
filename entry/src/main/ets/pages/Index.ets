@@ -17,9 +17,11 @@ import { TdClient } from '../tdlib/TdClient';
 import { AuthService, AppAuthState, AuthStateObserver } from '../core/AuthService';
 import { AuthStateType } from '../core/TdConstants';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
+import { MessageStore } from '../core/MessageStore';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
+import { ChatPanel } from '../components/ChatPanel';
 
 /** 认证状态 → 中文提示（M2 复审建议：技术串不直出用户 UI） */
 class AuthStateTextMap {
@@ -126,8 +128,10 @@ struct Index {
   private syncChatStoreLifecycle(appState: string): void {
     if (appState === AppAuthState.READY) {
       ChatListStore.getInstance().start();
+      MessageStore.getInstance().start();
     } else {
       ChatListStore.getInstance().reset();
+      MessageStore.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
     }
@@ -233,7 +237,7 @@ struct Index {
       });
       return;
     }
-    // md/lg：右侧聊天区显示选中会话名（消息流 M3 接入）
+    // md/lg：右侧聊天区内嵌 ChatPanel（消息流 + 输入区，与 sm ChatPage 复用同一组件）
     this.selectedChatId = row.chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(row.chatId);
   }
@@ -473,7 +477,7 @@ struct Index {
     })
   }
 
-  // 右侧聊天区（md/lg）：空态欢迎 / 选中会话标题（消息流 M3）
+  // 右侧聊天区（md/lg）：空态欢迎 / ChatPanel 内嵌（M3 组件化，消息流+输入区与 sm 复用）
   @Builder
   chatArea() {
     Column() {
@@ -486,9 +490,6 @@ struct Index {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Text('消息流 M3 接入')
-            .fontSize(12)
-            .fontColor(ChatUi.TEXT_SECONDARY)
         }
         .width('100%')
         .height(52)
@@ -496,14 +497,7 @@ struct Index {
         .alignItems(VerticalAlign.Center)
         .backgroundColor(ChatUi.LIST_BG)
 
-        Column() {
-          Text('消息流 M3 接入')
-            .fontSize(14)
-            .fontColor(ChatUi.TEXT_SECONDARY)
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
+        ChatPanel({ chatId: this.selectedChatId })
       } else {
         Column() {
           Blank()

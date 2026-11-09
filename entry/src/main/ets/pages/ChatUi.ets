@@ -27,6 +27,10 @@ export class ChatUi {
   static readonly TEXT_SECONDARY: string = '#7D8E9E';
   static readonly ROW_PRESSED_BG: string = '#202B36';
   static readonly BADGE_BG: string = '#3390EC';
+  // 消息气泡（M3）：incoming 深灰 / outgoing 沿用 ACCENT 蓝
+  static readonly BUBBLE_IN: string = '#242F3D';
+  static readonly BUBBLE_OUT: string = '#3390EC';
+  static readonly BUBBLE_ERROR: string = '#FF6B6B';
 
   /** 头像占位色板（chatId hash 取色；暗色背景下的中亮度系） */
   static readonly AVATAR_COLORS: Array<string> = [
