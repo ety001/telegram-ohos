@@ -2,6 +2,20 @@
  * 聊天相关页面共享视觉常量与小工具（M2）：会话列表列 / 聊天页复用。
  * 与登录流程页 AuthUi 平行的暗色系配色（Telegram 风格深蓝）。
  */
+import { ChatListStore } from '../core/ChatListStore';
+import { TimeFormat } from '../core/TimeFormat';
+import { TdField, TdMessageContent } from '../core/TdConstants';
+
+/** 会话行视图模型：由 TDLib chat 对象按需投影（仅可见行构建，千级列表零全量构建开销） */
+export class ChatRowModel {
+  chatId: number = 0;
+  title: string = '';
+  preview: string = '';
+  timeText: string = '';
+  unreadText: string = '';
+  pinned: boolean = false;
+}
+
 export class ChatUi {
   static readonly NAV_BG: string = '#0E1621';
   static readonly LIST_BG: string = '#17212B';
@@ -37,5 +51,96 @@ export class ChatUi {
       return '#';
     }
     return String.fromCodePoint(codePoint).toUpperCase();
+  }
+
+  /** TDLib chat 对象 → 会话行视图模型（原对象不变更，纯投影） */
+  static buildRow(chat: Record<string, Object>): ChatRowModel {
+    const row: ChatRowModel = new ChatRowModel();
+    const idObj: Object | undefined = chat[TdField.ID];
+    if (typeof idObj === 'number') {
+      row.chatId = idObj;
+    }
+    const titleObj: Object | undefined = chat[TdField.TITLE];
+    if (typeof titleObj === 'string') {
+      row.title = titleObj;
+    }
+    const lastMessage: Record<string, Object> | null = ChatUi.asRecord(chat[TdField.LAST_MESSAGE]);
+    if (lastMessage !== null) {
+      row.preview = ChatUi.previewText(lastMessage);
+      const dateObj: Object | undefined = lastMessage[TdField.DATE];
+      if (typeof dateObj === 'number') {
+        row.timeText = TimeFormat.formatChatListTime(dateObj, Date.now());
+      }
+    }
+    const unreadObj: Object | undefined = chat[TdField.UNREAD_COUNT];
+    if (typeof unreadObj === 'number' && unreadObj > 0) {
+      row.unreadText = unreadObj > 99 ? '99+' : `${unreadObj}`;
+    }
+    row.pinned = ChatListStore.getInstance().isPinned(row.chatId);
+    return row;
+  }
+
+  /**
+   * 最后消息预览提取：
+   * messageText → content.text.text（messageText.text 为 formattedText 对象）；
+   * 其余内容类型给中文占位文案；未知新类型回退 [消息]。
+   */
+  private static previewText(lastMessage: Record<string, Object>): string {
+    const content: Record<string, Object> | null = ChatUi.asRecord(lastMessage[TdField.CONTENT]);
+    if (content === null) {
+      return '';
+    }
+    const typeObj: Object | undefined = content[TdField.TYPE];
+    const type: string = typeof typeObj === 'string' ? typeObj : '';
+    if (type === TdMessageContent.TEXT) {
+      const formatted: Record<string, Object> | null = ChatUi.asRecord(content[TdField.TEXT]);
+      if (formatted === null) {
+        return '';
+      }
+      const textObj: Object | undefined = formatted[TdField.TEXT];
+      if (typeof textObj !== 'string') {
+        return '';
+      }
+      // 多行文本压成单行预览
+      return textObj.replace(/\s+/g, ' ').trim();
+    }
+    return ChatUi.contentPlaceholder(type);
+  }
+
+  private static contentPlaceholder(type: string): string {
+    switch (type) {
+      case TdMessageContent.PHOTO:
+        return '[图片]';
+      case TdMessageContent.VIDEO:
+      case TdMessageContent.VIDEO_NOTE:
+        return '[视频]';
+      case TdMessageContent.DOCUMENT:
+        return '[文件]';
+      case TdMessageContent.VOICE_NOTE:
+        return '[语音]';
+      case TdMessageContent.ANIMATION:
+        return '[动画]';
+      case TdMessageContent.STICKER:
+        return '[贴纸]';
+      case TdMessageContent.AUDIO:
+        return '[音频]';
+      case TdMessageContent.LOCATION:
+        return '[位置]';
+      case TdMessageContent.CONTACT:
+        return '[联系人]';
+      case TdMessageContent.POLL:
+        return '[投票]';
+      case TdMessageContent.CALL:
+        return '[通话]';
+      default:
+        return '[消息]';
+    }
+  }
+
+  private static asRecord(value: Object | undefined): Record<string, Object> | null {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      return value as Record<string, Object>;
+    }
+    return null;
   }
 }
