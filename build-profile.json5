@@ -1,14 +1,28 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "material": {
+          "storePassword": "000000204CDA77A23ABBA155DC18A27DF0BE1501C2240C5B069DC5E5ECB7232B526328C14466D85D3E65508E93753364",
+          "certpath": "/storage/Users/currentUser/.ohos/config/default_telegram-ohosN6Eo1XYo0nZT7OhHlQcZODJhsfgy5Gy5p4o8ujotx1A.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "000000204CDA77A23ABBA155DC18A27DF0BE1501C2240C5B069DC5E5ECB7232B526328C14466D85D3E65508E93753364",
+          "profile": "/storage/Users/currentUser/.ohos/config/default_telegram-ohosN6Eo1XYo0nZT7OhHlQcZODJhsfgy5Gy5p4o8ujotx1A.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/storage/Users/currentUser/.ohos/config/default_telegram-ohosN6Eo1XYo0nZT7OhHlQcZODJhsfgy5Gy5p4o8ujotx1A.p12"
+        },
+        "type": "HarmonyOS"
+      }
+    ],
     "products": [
       {
         "name": "default",
-        // HarmonyOS 7.0（API 26）起 SDK 版本号使用 "26.x.x" 字符串格式
         "compileSdkVersion": "26.0.0",
         "compatibleSdkVersion": "26.0.0",
         "targetSdkVersion": "26.0.0",
-        "runtimeOS": "HarmonyOS"
+        "runtimeOS": "HarmonyOS",
+        "signingConfig": "default"
       }
     ],
     "buildModeSet": [

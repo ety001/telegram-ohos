@@ -29,11 +29,13 @@
 
 // TDLib tdjson C API（新式四函数）。仓库只入库二进制无头文件，按官方
 // td_json_client.h 原型自行声明；符号由 libs/arm64-v8a/libtdjson.so 提供。
+// ⚠️ td_execute 是全局函数，只收 request 不收 client_id（M3 真机 SEGV 根因修复：
+//    误传 client_id 会被当作字符串指针，strlen((char*)1) → SIGSEGV@0x1）。
 extern "C" {
 int td_create_client_id();
 void td_send(int client_id, const char *request);
 const char *td_receive(double timeout);
-const char *td_execute(int client_id, const char *request);
+const char *td_execute(const char *request);
 }
 
 namespace {
@@ -184,6 +186,7 @@ extern "C" napi_value tdnapi_send(napi_env env, napi_callback_info info) {
 
 // JS: executeSync(clientId: number, request: string): string —— td_execute（同步）
 // 适用：登录前的配置类请求（getVersion/setOption 等），不依赖接收线程。
+// 注意：td_execute 是全局函数、与 client 无关——clientId 参数保留仅为 JS 侧签名兼容，实现忽略。
 extern "C" napi_value tdnapi_executeSync(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2] = {nullptr, nullptr};
@@ -202,10 +205,10 @@ extern "C" napi_value tdnapi_executeSync(napi_env env, napi_callback_info info) 
     ThrowError(env, "executeSync: request 不是非空 string");
     return nullptr;
   }
-  const char *result = td_execute(client_id, request.c_str());
+  const char *result = td_execute(request.c_str());
   // 要点 1 同源：返回指针在下次 td_* 调用前失效，立即复制进 napi string
   napi_value out = nullptr;
-  if (napi_create_string_utf8(env, result != nullptr ? result : "", NAPI_AUTO_LENGTH, &out) != napi_ok) {
+  if (result != nullptr && napi_create_string_utf8(env, result, NAPI_AUTO_LENGTH, &out) != napi_ok) {
     ThrowError(env, "executeSync: napi_create_string_utf8 失败");
     return nullptr;
   }
