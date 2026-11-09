@@ -13,6 +13,7 @@
  * 页根组件不主动延伸安全区——真机（手机挖孔/手势条）验证挂 M2 验收。
  */
 import { router } from '@kit.ArkUI';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { TdClient } from '../tdlib/TdClient';
 import { AuthService, AppAuthState, AuthStateObserver } from '../core/AuthService';
 import { AuthStateType } from '../core/TdConstants';
@@ -186,7 +187,9 @@ struct Index {
       this.tdStatusText = `TDLib ${String(rawVersion)} · connected`;
       this.tdConnected = true;
     } catch (error) {
-      this.tdStatusText = TD_STATUS_ERROR;
+      // 诊断增强：透传真实错误（BusinessError.code / Error.message），定位 td_execute 不可用根因
+      const err = error as BusinessError;
+      this.tdStatusText = `${TD_STATUS_ERROR}: ${err.message ?? ''} (code=${err.code ?? '?'})`;
       this.tdConnected = false;
     }
   }
