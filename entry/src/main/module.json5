@@ -4,9 +4,12 @@
     "type": "entry",
     "description": "$string:module_desc",
     "mainElement": "EntryAbility",
-    // PC-only：只声明 2in1，不加 phone（避免触发手机后台挂起逻辑）
+    // 三形态自适应（2026-04 决策，PLAN §4）：PC(2in1)/平板/手机。
+    // 含 phone 后 PC 端最小化不再豁免后台管控——双端保活统一走长时任务（PLAN M4 处理）
     "deviceTypes": [
-      "2in1"
+      "2in1",
+      "tablet",
+      "phone"
     ],
     "deliveryWithInstall": true,
     "installationFree": false,

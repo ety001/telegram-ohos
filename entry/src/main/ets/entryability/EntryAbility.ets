@@ -4,6 +4,7 @@ import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ConfigStore } from '../core/ConfigStore';
 import { TdClient } from '../tdlib/TdClient';
+import { BreakpointTool } from '../core/BreakpointTool';
 
 const TAG: string = 'EntryAbility';
 const LOG_DOMAIN: number = 0x0011;
@@ -23,6 +24,8 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(LOG_DOMAIN, TAG, 'onWindowStageCreate');
+    // 断点初值先于首页 loadContent 就绪（Index aboutToAppear 即可读到真实断点）
+    BreakpointTool.getInstance().attach(windowStage);
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         hilog.error(LOG_DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
