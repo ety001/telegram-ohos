@@ -141,7 +141,9 @@ export class NotificationService {
     try {
       this.bundleName = context.abilityInfo.bundleName;
     } catch (err) {
-      // abilityInfo 读取异常仅降级点击路由参数（空 bundleName 由系统按当前应用兜底拉起）
+      // 读取异常仅置空降级：wantAgent 的 want 以 bundleName+abilityName 定位目标 ability，
+      // bundleName 为空时点击拉起可能失效——失败面收敛为「点击通知不路由」（通知本体展示
+      // 与撤下均不受影响，消息仍在会话内可见）；本路径仅在 abilityInfo 读取抛错时到达（防御性）
       this.bundleName = '';
       hilog.warn(LOG_DOMAIN, TAG, 'read bundleName failed: %{private}s', JSON.stringify(err));
     }
@@ -191,7 +193,8 @@ export class NotificationService {
     this.publishForChat(chatId, message);
   }
 
-  /** chat.notification_settings.mute_for > 0 → 免打扰（1.8.63 schema：chatNotificationSettings.mute_for） */
+  /** chat.notification_settings.mute_for > 0 → 免打扰（1.8.63 schema：chatNotificationSettings.mute_for；
+   *  数据源由 ChatListStore 的 updateChatNotificationSettings handler 实时刷新，复审 HIGH-2） */
   private isMuted(chatId: number): boolean {
     const chat: Record<string, Object> | undefined = ChatListStore.getInstance().getChat(chatId);
     if (chat === undefined) {
@@ -224,6 +227,7 @@ export class NotificationService {
           this.publish(chatId, agent, title, text, additional);
         }).catch((err: BusinessError): void => {
           hilog.warn(LOG_DOMAIN, TAG, 'getWantAgent failed: %{public}d', err.code);
+          this.rollbackPending(chatId); // 通知未发布，计数回滚（见 rollbackPending 注释）
         });
       });
   }
@@ -238,7 +242,8 @@ export class NotificationService {
     }
     const request: notificationManager.NotificationRequest = {
       id: NotificationService.notificationIdOf(chatId),
-      // 社交通信类槽位（LEVEL_HIGH：横幅+震动提醒；槽位/分组细化 M5）
+      // 社交通信类槽位（LEVEL_HIGH：通知中心/铃声/振动/锁屏默认开启；横幅默认关闭——
+      // 横幅为用户侧系统设置项，应用不可控。槽位/分组细化 M5）
       notificationSlotType: notificationManager.SlotType.SOCIAL_COMMUNICATION,
       content: {
         notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
@@ -253,7 +258,9 @@ export class NotificationService {
           this.pendingByChat.get(chatId) ?? 0);
       })
       .catch((err: BusinessError): void => {
-        // 失败不重试不打扰（通知为增强通道，消息本体已在会话内）
+        // 失败不重试不打扰（通知为增强通道，消息本体已在会话内）；
+        // 回滚本条计数（复审 LOW-7）：失败的通知从未上屏，留着会让同会话下一条多算「N 条新消息」
+        this.rollbackPending(chatId);
         hilog.warn(LOG_DOMAIN, TAG, 'publish failed: %{public}d', err.code);
       });
   }
@@ -277,6 +284,17 @@ export class NotificationService {
       .catch((err: BusinessError): void => {
         hilog.warn(LOG_DOMAIN, TAG, 'cancel failed: %{public}d', err.code);
       });
+  }
+
+  /** publish/getWantAgent 失败回滚该会话的一条计数（未上屏的通知不计入「N 条新消息」）；
+   *  并发同会话消息交错到账的极端时序下计数偏差 ±1——计数仅用于附加文案，取舍可接受 */
+  private rollbackPending(chatId: number): void {
+    const count: number = this.pendingByChat.get(chatId) ?? 0;
+    if (count <= 1) {
+      this.pendingByChat.delete(chatId);
+    } else {
+      this.pendingByChat.set(chatId, count - 1);
+    }
   }
 
   private resolveTitle(chatId: number): string {
@@ -331,7 +349,7 @@ export class NotificationService {
         hilog.info(LOG_DOMAIN, TAG, 'notification re-enabled in settings');
       }
     } catch (err) {
-      hilog.warn(LOG_DOMAIN, TAG, 'query enabled failed: %{public}s', JSON.stringify(err));
+      hilog.warn(LOG_DOMAIN, TAG, 'query enabled failed: %{private}s', JSON.stringify(err));
     }
   }
 
@@ -375,8 +393,12 @@ export class NotificationService {
     if (typeof value === 'number' && Number.isFinite(value)) {
       chatId = value;
     } else if (typeof value === 'string') {
-      // want 参数经系统侧序列化可能字符串化，防御双形态
-      chatId = Number.parseInt(value);
+      // want 参数经系统侧序列化可能字符串化，防御双形态；非数字载荷 parseInt 得 NaN，直接忽略
+      const parsed: number = Number.parseInt(value);
+      if (!Number.isFinite(parsed)) {
+        return;
+      }
+      chatId = parsed;
     }
     if (chatId === 0) {
       return;
@@ -418,7 +440,8 @@ export class NotificationService {
 
   // ---------------- 工具 ----------------
 
-  /** 按码点截断（CJK/emoji 不劈半） */
+  /** 按码点截断：单码点字符（含 BMP 内 CJK）不会劈半；字素簇（ZWJ 组合 emoji、
+   *  国旗等多码点序列）可能被切在簇中间——展示层单行省略场景可容忍，暂不引 ICU 分簇 */
   private static truncate(text: string, maxChars: number): string {
     if (text.length <= maxChars) {
       return text;

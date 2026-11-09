@@ -45,6 +45,9 @@ export class TdUpdate {
   static readonly CHAT_READ_INBOX: string = 'updateChatReadInbox';
   static readonly CHAT_TITLE: string = 'updateChatTitle';
   static readonly CHAT_PHOTO: string = 'updateChatPhoto';
+  // 免打扰设置变更（M3-notifications 复审 HIGH-2；1.8.63 schema：updateChatNotificationSettings
+  // { notification_settings, chat_id? }——chat_id 缺省即全局默认设置变更，消费侧按会话粒度忽略）
+  static readonly CHAT_NOTIFICATION_SETTINGS: string = 'updateChatNotificationSettings';
   // getChats/searchChats 的结果对象（@type=chats，结果与 update 走同一分发入口）
   static readonly CHATS: string = 'chats';
   // getChat 的结果对象（@type=chat，chats 结果缺项时的补拉响应）

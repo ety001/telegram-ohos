@@ -96,6 +96,10 @@ export class ChatListStore {
     this.handleChatPhoto(update);
   };
 
+  private readonly onChatNotificationSettings: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatNotificationSettings(update);
+  };
+
   /**
    * 登录就绪后触发（幂等）：挂路由 + 拉首屏。
    * 极端时序（ready 与 start 之间恰好新产生会话导致 updateNewChat 先于注册到达）下
@@ -115,6 +119,7 @@ export class ChatListStore {
     router.register(TdUpdate.CHAT_READ_INBOX, this.onChatReadInbox);
     router.register(TdUpdate.CHAT_TITLE, this.onChatTitle);
     router.register(TdUpdate.CHAT_PHOTO, this.onChatPhoto);
+    router.register(TdUpdate.CHAT_NOTIFICATION_SETTINGS, this.onChatNotificationSettings);
     hilog.info(LOG_DOMAIN, TAG, 'start: request first page, limit=%{public}d', PAGE_SIZE);
     this.requestFirstPage();
   }
@@ -396,6 +401,31 @@ export class ChatListStore {
     if (photo !== undefined) {
       chat[TdField.PHOTO] = photo;
     }
+    this.notifyChanged();
+  }
+
+  /**
+   * updateChatNotificationSettings（1.8.63 schema：{ notification_settings, chat_id? }）：
+   * 免打扰等设置变更整体替换对应 chat 的 notification_settings——这是
+   * NotificationService.isMuted 的唯一数据源，不接此更新则 mute_for 永远停留在
+   * updateNewChat 入库时的快照（复审 HIGH-2：mute_for 数据源永不刷新）。
+   * chat_id 缺省（全局默认设置变更）时忽略：本仓库按会话粒度消费，全量刷新需逐 chat
+   * 重拉 getChat，代价大于收益（设置类功能整体挂 M5）。
+   */
+  private handleChatNotificationSettings(update: Record<string, Object>): void {
+    const chatId: number = this.readChatId(update);
+    if (chatId === 0) {
+      return;
+    }
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return;
+    }
+    const settings: Record<string, Object> | null = this.readRecord(update, TdField.NOTIFICATION_SETTINGS);
+    if (settings === null) {
+      return;
+    }
+    chat[TdField.NOTIFICATION_SETTINGS] = settings;
     this.notifyChanged();
   }
 
