@@ -25,7 +25,7 @@ const TEST_PROXY_EXTRA_PREFIX: string = 'testProxy';
 const TEST_PROXY_TIMEOUT_MS: number = 20000;
 const ACTION_TIMEOUT_MS: number = 15000;
 /** 与 AppScope/app.json5 versionName 保持同步 */
-const APP_VERSION: string = '0.1.0';
+const APP_VERSION: string = '0.2.0';
 
 /** 应用层认证状态 */
 export class AppAuthState {

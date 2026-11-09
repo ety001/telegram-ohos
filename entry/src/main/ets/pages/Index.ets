@@ -160,6 +160,12 @@ struct Index {
   private refreshVisibleCount(): void {
     this.visibleCount = this.dataSource.totalCount();
     if (this.selectedChatId !== 0) {
+      // 会话操作菜单可删除当前选中会话：列表更新时校验选中项仍存在（md/lg 右侧聊天区回空态）
+      if (!ChatListStore.getInstance().getOrderedIds().includes(this.selectedChatId)) {
+        this.selectedChatId = 0;
+        this.selectedChatTitle = '';
+        return;
+      }
       const title: string = ChatListStore.getInstance().getTitle(this.selectedChatId);
       if (title.length > 0) {
         this.selectedChatTitle = title;
@@ -476,7 +482,7 @@ struct Index {
     .justifyContent(FlexAlign.Center)
   }
 
-  // 会话行：头像占位（首字母圆环）+ 标题 + 预览 + 相对时间 + 未读角标 + 置顶标记
+  // 会话行：头像占位（首字母圆环）+ 标题 + 预览 + 相对时间 + 未读角标 + 置顶/静音标记
   @Builder
   chatRow(item: ChatRowModel) {
     Row({ space: 12 }) {
@@ -515,6 +521,12 @@ struct Index {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
+          if (item.muted) {
+            Text('静音')
+              .fontSize(10)
+              .fontColor(ChatUi.TEXT_SECONDARY)
+              .margin({ left: 8 })
+          }
           if (item.pinned) {
             Text('置顶')
               .fontSize(10)
@@ -530,7 +542,8 @@ struct Index {
               .borderRadius(10)
               .textAlign(TextAlign.Center)
               .padding({ left: 6, right: 6 })
-              .backgroundColor(ChatUi.BADGE_BG)
+              // 静音会话未读角标置灰（Telegram 语义：不提醒的未读）
+              .backgroundColor(item.muted ? ChatUi.TEXT_SECONDARY : ChatUi.BADGE_BG)
               .margin({ left: 8 })
           }
         }
@@ -548,6 +561,55 @@ struct Index {
     .onClick((): void => {
       this.openChat(item);
     })
+    // 会话操作菜单（M5）：长按（触屏/触控板）与右键（PC 鼠标）双入口，同一份菜单
+    .bindContextMenu(this.chatRowMenu(item), ResponseType.LongPress)
+    .bindContextMenu(this.chatRowMenu(item), ResponseType.RightClick)
+  }
+
+  /** 会话操作菜单：置顶 / 静音 / 删除（动作走 ChatListStore，结果由更新流驱动刷新） */
+  @Builder
+  chatRowMenu(item: ChatRowModel) {
+    Menu() {
+      MenuItem({ content: item.pinned ? '取消置顶' : '置顶' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          ChatListStore.getInstance().togglePinned(item.chatId);
+        })
+      MenuItem({ content: item.muted ? '取消静音' : '静音' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          ChatListStore.getInstance().setMuted(item.chatId, !item.muted);
+        })
+      MenuItem({ content: '删除会话' })
+        .contentFontColor(ChatUi.BUBBLE_ERROR)
+        .onClick((): void => {
+          this.confirmDeleteChat(item);
+        })
+    }
+    // 应用为固定深色视觉，Menu 默认底色跟随系统会跳浅色——显式对齐列表底色
+    .backgroundColor(ChatUi.LIST_BG)
+    .radius(12)
+  }
+
+  /** 删除会话二次确认（AlertDialog）：deleteChat 不可逆且群聊对所有成员生效 */
+  private confirmDeleteChat(item: ChatRowModel): void {
+    this.getUIContext().showAlertDialog({
+      title: '删除会话',
+      message: `确定删除「${item.title}」？该会话的全部消息将被删除，群聊将对所有成员生效。`,
+      autoCancel: true,
+      primaryButton: {
+        value: '取消',
+        action: (): void => {
+        }
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: ChatUi.BUBBLE_ERROR,
+        action: (): void => {
+          ChatListStore.getInstance().deleteChat(item.chatId);
+        }
+      }
+    });
   }
 
   // 右侧聊天区（md/lg）：空态欢迎 / ChatPanel 内嵌（M3 组件化，消息流+输入区与 sm 复用）

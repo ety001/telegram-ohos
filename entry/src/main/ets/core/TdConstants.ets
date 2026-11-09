@@ -33,6 +33,13 @@ export class TdReq {
   // 尚无 suffix 参数——后版 schema 才引入，勿混用）
   static readonly DOWNLOAD_FILE: string = 'downloadFile';
   static readonly CANCEL_DOWNLOAD_FILE: string = 'cancelDownloadFile';
+  // 会话操作（M5；结果经 updateChatPosition / updateChatNotificationSettings / 列表移除等更新流驱动）
+  // 1.8.63 schema：toggleChatIsPinned(chat_list:ChatList, chat_id:int53, is_pinned:Bool)
+  static readonly TOGGLE_CHAT_IS_PINNED: string = 'toggleChatIsPinned';
+  // 1.8.63 schema：setChatNotificationSettings(chat_id:int53, notification_settings:chatNotificationSettings)
+  static readonly SET_CHAT_NOTIFICATION_SETTINGS: string = 'setChatNotificationSettings';
+  // 1.8.63 schema：deleteChat(chat_id:int53)——群聊将同时删除所有成员的会话（can_be_deleted_for_all_users 判定）
+  static readonly DELETE_CHAT: string = 'deleteChat';
 }
 
 export class TdUpdate {
@@ -124,6 +131,33 @@ export class TdMessageSource {
   static readonly CHAT_HISTORY: string = 'messageSourceChatHistory';
 }
 
+/**
+ * TextEntityType 子类型（formattedText.entities[].type['@type']，M5 富文本渲染）。
+ * 1.8.63 td_api.tl（commit f06b0bac）逐条核对；未列出的类型（custom_emoji/spoiler/block_quote/
+ * media_timestamp/date_time）M5 暂按普通文本渲染（贴纸面板/剧透遮罩等属后续迭代）。
+ */
+export class TdTextEntityType {
+  static readonly BOLD: string = 'textEntityTypeBold';
+  static readonly ITALIC: string = 'textEntityTypeItalic';
+  static readonly UNDERLINE: string = 'textEntityTypeUnderline';
+  static readonly STRIKETHROUGH: string = 'textEntityTypeStrikethrough';
+  static readonly CODE: string = 'textEntityTypeCode';
+  static readonly PRE: string = 'textEntityTypePre';
+  static readonly PRE_CODE: string = 'textEntityTypePreCode';
+  /** 带显式 url 字段的可点击链接（url 为 HTTP 或 tg:// 深链） */
+  static readonly TEXT_URL: string = 'textEntityTypeTextUrl';
+  /** 原文即 URL 的链接（点击目标 = 该段文本本身） */
+  static readonly URL: string = 'textEntityTypeUrl';
+  // 以下类型渲染为链接色（mention 等），点击跳转属后续迭代
+  static readonly MENTION: string = 'textEntityTypeMention';
+  static readonly HASHTAG: string = 'textEntityTypeHashtag';
+  static readonly CASHTAG: string = 'textEntityTypeCashtag';
+  static readonly BOT_COMMAND: string = 'textEntityTypeBotCommand';
+  static readonly EMAIL_ADDRESS: string = 'textEntityTypeEmailAddress';
+  static readonly PHONE_NUMBER: string = 'textEntityTypePhoneNumber';
+  static readonly MENTION_NAME: string = 'textEntityTypeMentionName';
+}
+
 /** TDLib 通用字段名 */
 export class TdField {
   static readonly TYPE: string = '@type';
@@ -151,6 +185,11 @@ export class TdField {
   static readonly CONTENT: string = 'content';
   static readonly TEXT: string = 'text';
   static readonly LIMIT: string = 'limit';
+  // 富文本 entities（M5；formattedText.entities，offset/length 均按 UTF-16 code unit 计）
+  // 注：OFFSET 复用下方 downloadFile 请求的既有同名常量（字段名同为 'offset'）
+  static readonly ENTITIES: string = 'entities';
+  static readonly LENGTH: string = 'length';
+  static readonly URL: string = 'url';
   // message / 消息请求通用字段（M3）
   static readonly MESSAGE_ID: string = 'message_id';
   static readonly MESSAGE_IDS: string = 'message_ids';
@@ -171,6 +210,8 @@ export class TdField {
   // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
   static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';
   static readonly MUTE_FOR: string = 'mute_for';
+  // setChatNotificationSettings 入参：置 false 才能按会话粒度覆盖 mute_for（M5 会话菜单）
+  static readonly USE_DEFAULT_MUTE_FOR: string = 'use_default_mute_for';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）
   // 注意：messagePhoto.photo 复用上方 chat.photo 的 PHOTO 常量（同名同值）
   static readonly VIDEO: string = 'video';

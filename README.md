@@ -4,7 +4,7 @@
 
 - 技术栈：ArkTS / ArkUI (API 26, 三形态自适应) + TDLib (libtdjson) + NAPI 桥
 - 目标设备：HarmonyOS 7 全家桶——PC / 手机 / 平板（真机均为 API 26）
-- 状态：🚧 M0 工程骨架 ✅（PR #1）；M1 TDLib 交叉编译 ✅（PR #2，libtdjson.so v1.8.63）；CI 编译流水线落地中；deviceTypes 三形态自 M2 落地
+- 状态：✅ M0-M4 已完成（工程骨架 / TDLib 交叉编译 + NAPI 桥 / 登录与会话列表 / 消息收发 + 媒体 + 本地通知 / 双端保活，PR #1-#10）；✅ M5 打磨（消息富文本渲染、会话操作菜单、复审遗留修复）；待真机验证清单见 [docs/PLAN.md](docs/PLAN.md)（各里程碑挂账的实测项）
 
 ## 文档
 

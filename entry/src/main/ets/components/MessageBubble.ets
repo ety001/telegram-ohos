@@ -1,5 +1,5 @@
 /**
- * 消息气泡（M3 / M3-media）：ChatPanel 消息流子组件。
+ * 消息气泡（M3 / M3-media / M5 富文本）：ChatPanel 消息流子组件。
  *
  * 分支结构（model.mediaKind）：
  * - photo：选中档（宽 ≤1080）下载完成前 minithumbnail（base64 data URI）立即显示，完成后换真图；
@@ -8,7 +8,9 @@
  *   完成后自动拉起 AVPlayer 播放页
  * - document：文件名/大小 + 下载按钮；点击下载，完成自动走 DocumentViewPicker 保存到用户目录
  * - voice/animation/sticker/audio：占位文案（M5 实装），**占位不崩溃**
- * - 文本（默认）：formattedText.text 纯文本（entities 富文本 M5）
+ * - 文本（默认）：formattedText 富文本渲染（M5）——entities 切分（RichText，UTF-16 code unit
+ *   与 JS 字符串同基）→ Text 子 Span 样式（bold/italic/underline/strikethrough/code/链接色）；
+ *   Url/TextUrl 切片可点击（stopPropagation 防误触气泡动作，openLink 拉起浏览器/深链）
  *
  * 下载状态：组件订阅 FileDownloadStore（onFileChanged → 本地 @State），
  * ForEach 键不含下载进度（避免整泡重建），气泡内部自刷新。
@@ -18,6 +20,7 @@
 import { common } from '@kit.AbilityKit';
 import { ChatUi } from '../pages/ChatUi';
 import { MediaKind } from '../core/MessageContent';
+import { RichSegment } from '../core/RichText';
 import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { MediaSaver, SaveResult } from '../core/MediaSaver';
 
@@ -41,6 +44,12 @@ export class MessageBubbleModel {
   messageId: number = 0;
   isOutgoing: boolean = false;
   text: string = '';
+  /** M5 富文本：messageText 的 entities 样式切片（空 = 纯文本走原 Text 路径） */
+  segments: Array<RichSegment> = [];
+  /** photo/video/document 的 caption 样式切片（同上） */
+  captionSegments: Array<RichSegment> = [];
+  /** 富文本样式指纹（keySuffix 用：仅改 entity 不改文本的编辑也能触发重建） */
+  styleKey: string = '';
   timeText: string = '';
   /** 发送时间（unix 秒，分组头计算用） */
   dateSeconds: number = 0;
@@ -83,9 +92,11 @@ export class MessageBubbleModel {
 
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
-    // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）
+    // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）；
+    // M5 追加样式指纹：仅改 entity（换链接目标/加粗范围）而文本不变的编辑同样触发重建
     return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}` +
-      `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}`;
+      `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
+      `_${this.styleKey}`;
   }
 }
 
@@ -253,11 +264,11 @@ export struct MessageBubble {
         }
 
         if (this.model.caption.length > 0) {
-          Text(this.model.caption)
-            .fontSize(14)
-            .lineHeight(20)
-            .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY)
-            .margin({ top: 4, left: 4, right: 4 })
+          Column() {
+            this.richBody(this.model.captionSegments, this.model.caption, 14, 20)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .margin({ top: 4, left: 4, right: 4 })
         }
 
         if (this.model.sendState === BubbleSendState.FAILED) {
@@ -284,6 +295,9 @@ export struct MessageBubble {
     }
     .constraintSize({ maxWidth: '78%' })
     .onClick((): void => {
+      if (this.consumeLinkClick()) {
+        return; // 链接切片点击已消费（见 linkClickConsumed 注释）
+      }
       if (this.model.mediaKind === MediaKind.VIDEO) {
         this.handleVideoClick();
       } else {
@@ -341,10 +355,11 @@ export struct MessageBubble {
       .alignItems(VerticalAlign.Center)
 
       if (this.model.caption.length > 0) {
-        Text(this.model.caption)
-          .fontSize(14)
-          .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY)
-          .margin({ top: 4 })
+        Column() {
+          this.richBody(this.model.captionSegments, this.model.caption, 14, 20)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .margin({ top: 4 })
       }
 
       Row({ space: 4 }) {
@@ -371,6 +386,9 @@ export struct MessageBubble {
     .borderRadius(12)
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
     .onClick((): void => {
+      if (this.consumeLinkClick()) {
+        return; // 链接切片点击已消费（见 linkClickConsumed 注释）
+      }
       this.handleDocumentClick();
     })
   }
@@ -381,11 +399,7 @@ export struct MessageBubble {
   textBubble() {
     Column() {
       if (this.model.text.length > 0) {
-        Text(this.model.text)
-          .fontSize(15)
-          .lineHeight(21)
-          .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY)
-          .textAlign(TextAlign.Start)
+        this.richBody(this.model.segments, this.model.text, 15, 21)
       } else {
         // 媒体类型占位（语音/动图/贴纸 M5 实装）或未知类型兜底——占位不崩溃
         Text(this.model.placeholder.length > 0 ? this.model.placeholder : '[暂不支持的消息类型]')
@@ -416,11 +430,116 @@ export struct MessageBubble {
     .borderRadius(12)
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
     .onClick((): void => {
+      if (this.consumeLinkClick()) {
+        return; // 链接切片点击已消费（见 linkClickConsumed 注释）
+      }
       // 失败气泡点击 = 重试（其余点击无动作；长按菜单 M5）
       if (this.model.sendState === BubbleSendState.FAILED && this.model.canRetry) {
         this.onRetry(this.model.messageId);
       }
     })
+  }
+
+  // ---------------- 富文本渲染（M5：entities → Text 子 Span） ----------------
+
+  /**
+   * 富文本/纯文本统一渲染入口：
+   * - 无样式（无 entities 或全部为普通切片）→ 单 Text 纯文本（原路径，零开销）；
+   * - 有样式 → Text 内 ForEach Span 切片（Span 属性显式全量设置：不依赖父 Text 继承，
+   *   基色/装饰按切片样式计算）。
+   * Span 仅支持 onClick/onHover 两个通用事件（官方 span.d.ts 声明），链接点击经
+   * stopPropagation 阻断冒泡，避免误触气泡级 onClick（图片预览/失败重试）。
+   */
+  @Builder
+  richBody(segments: Array<RichSegment>, plain: string, fontSize: number, lineHeight: number) {
+    if (this.hasRichStyle(segments)) {
+      Text() {
+        ForEach(segments, (segment: RichSegment) => {
+          Span(segment.text)
+            .fontWeight(segment.bold ? FontWeight.Bold : FontWeight.Normal)
+            .fontStyle(segment.italic ? FontStyle.Italic : FontStyle.Normal)
+            .decoration(this.decorationOf(segment))
+            .fontColor(this.segmentColorOf(segment))
+            // 等宽字体：monospace 不可用时按列表回落 HarmonyOS Sans（fontFamily 官方支持逗号回落）
+            .fontFamily(segment.code ? 'monospace, HarmonyOS Sans' : 'HarmonyOS Sans')
+            .onClick((): void => {
+              if (segment.url.length > 0) {
+                this.linkClickConsumed = true;
+                this.openExternalLink(segment.url);
+              }
+            })
+        }, (segment: RichSegment, index: number) => `${index}_${segment.text.length}_${segment.url.length}`)
+      }
+      .fontSize(fontSize)
+      .lineHeight(lineHeight)
+      .textAlign(TextAlign.Start)
+    } else {
+      Text(plain)
+        .fontSize(fontSize)
+        .lineHeight(lineHeight)
+        .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY)
+        .textAlign(TextAlign.Start)
+    }
+  }
+
+  /**
+   * 链接切片点击消费标记：ClickEvent 无 stopPropagation（官方 d.ts：仅 Touch/Hover 支持），
+   * 利用点击冒泡「子（Span）先、父（气泡）后」的顺序——Span 命中置位，气泡 onClick 首行检查并复位
+   */
+  private linkClickConsumed: boolean = false;
+
+  /** 链接切片点击是否已消费（取用即复位；冒泡顺序保证 Span 先于气泡 onClick 置位） */
+  private consumeLinkClick(): boolean {
+    const consumed: boolean = this.linkClickConsumed;
+    this.linkClickConsumed = false;
+    return consumed;
+  }
+
+  /** 存在任一样式切片（决定走 Span 分支还是纯 Text 分支） */
+  private hasRichStyle(segments: Array<RichSegment>): boolean {
+    for (const segment of segments) {
+      if (!segment.isPlain()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 切片文字色：链接色（incoming 用 ACCENT 蓝；outgoing 泡为 ACCENT 底，沿用既有的
+   * 浅蓝次级色保证对比度）> 普通基色（白/主文字色）。
+   */
+  private segmentColorOf(segment: RichSegment): string {
+    if (segment.link) {
+      return this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT;
+    }
+    return this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY;
+  }
+
+  /**
+   * 切片装饰线：下划线/删除线合并计算（Span 的 decoration 为单一类型，二者同时命中时
+   * 取 LineThrough——视觉主导，TDLib 中两者叠加也极罕见）。
+   */
+  private decorationOf(segment: RichSegment): DecorationStyleInterface {
+    if (segment.strikethrough) {
+      return { type: TextDecorationType.LineThrough, color: this.segmentColorOf(segment) };
+    }
+    if (segment.underline) {
+      return { type: TextDecorationType.Underline, color: this.segmentColorOf(segment) };
+    }
+    return { type: TextDecorationType.None, color: Color.Black };
+  }
+
+  /** 链接切片点击：openLink 拉起系统浏览器/深链处理器（M5 简版，无内置预览） */
+  private openExternalLink(url: string): void {
+    const hostContext: Object | undefined = this.getUIContext().getHostContext();
+    if (hostContext === undefined) {
+      return;
+    }
+    const context: common.UIAbilityContext = hostContext as common.UIAbilityContext;
+    // 打开失败（无可用处理器等）静默降级：错误对象可能携带 URL（属消息内容），不打日志
+    context.openLink(url).catch((): void => {
+    });
   }
 
   // ---------------- 点击动作 ----------------

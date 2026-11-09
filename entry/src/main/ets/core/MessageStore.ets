@@ -73,6 +73,12 @@ interface ChatMessageCache {
   lastViewedMaxId: number;
   /** 会话关闭期停更标记（supergroup/channel）：重激活时缓存不可信，丢弃重拉（M2 复审修复） */
   stale: boolean;
+  /**
+   * 缓存世代（M5 复审 LOW 修复）：stale 重置时自增。在途 getChatHistory 响应落定时
+   * 比对世代，不一致即丢弃——防止上翻响应把陈旧消息并回刚被丢弃重拉的缓存。
+   * 取值来自仓库级单调序列（cacheGenerationSeq），缓存淘汰重建后两代永不重号。
+   */
+  generation: number;
 }
 
 /** 发送在途登记：@extra → 本地占位（响应到达后占位 → TDLib 临时消息） */
@@ -93,6 +99,8 @@ export class MessageStore {
   private activeChatId: number = 0;
   private actionSeq: number = 0;
   private localIdSeq: number = 0;
+  /** 缓存世代单调序列（createCache / stale 重置取号；见 ChatMessageCache.generation） */
+  private cacheGenerationSeq: number = 0;
   private pendingSends: Map<string, PendingSend> = new Map();
 
   private constructor() {
@@ -235,9 +243,13 @@ export class MessageStore {
     if (cache.stale) {
       // supergroup/channel 关闭期停更：缓存不可信（有缺口+删除残留），丢弃重拉
       // （M2 复审 MEDIUM 修复：只增合并无法自愈 >1 页缺口与删除残留）
+      // M5 复审 LOW 修复：世代自增使在途上翻响应整体作废（见 requestHistory 比对）
+      this.cacheGenerationSeq += 1;
+      cache.generation = this.cacheGenerationSeq;
       cache.messages = [];
       cache.oldestLoadedId = 0;
       cache.hasMore = true;
+      cache.loadingOlder = false;
       cache.stale = false;
     }
     // openChat：supergroup/channel 的消息更新仅对已打开会话下发（td_api.tl openChat 注释）
@@ -289,6 +301,16 @@ export class MessageStore {
   /** 首屏是否已就位（UI 区分「加载中」与「暂无消息」空态用） */
   hasCache(chatId: number): boolean {
     return this.caches.has(chatId);
+  }
+
+  /**
+   * 首屏仍在拉取中（M5 空态语义修正）：缓存已建、已请求过、尚无任何消息且未判定到底。
+   * 覆盖两态：首屏请求在途 / stale 重置后的重拉在途——均应显示「加载中…」而非「暂无消息」。
+   */
+  isFirstPagePending(chatId: number): boolean {
+    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+    return cache !== undefined && cache.initialRequested && cache.messages.length === 0 &&
+      cache.hasMore && !cache.loadingOlder;
   }
 
   canLoadOlder(chatId: number): boolean {
@@ -382,11 +404,20 @@ export class MessageStore {
     const isOlderPage: boolean = fromMessageId > 0;
     const snapshotCache: ChatMessageCache | undefined = this.caches.get(chatId);
     const snapshotLength: number = snapshotCache === undefined ? 0 : snapshotCache.messages.length;
+    // 捕获缓存世代（M5 复审 LOW 修复）：响应落定时世代不一致（stale 重置已发生）即整体丢弃
+    const generation: number = snapshotCache === undefined ? 0 : snapshotCache.generation;
     TdUpdateRouter.getInstance().waitForExtra(extra, HISTORY_TIMEOUT_MS)
       .then((update: Record<string, Object>): void => {
         const cache: ChatMessageCache | undefined = this.caches.get(chatId);
         if (cache === undefined) {
           return; // 请求在途时会话被 LRU 淘汰：丢弃（重激活会重新拉取）
+        }
+        if (cache.generation !== generation) {
+          // stale 重置后的迟到响应：内容不可信（缺口/删除残留），整体丢弃，不碰 loadingOlder
+          // （重置时已复位，此处再写反而会覆盖重拉请求的在途标记）
+          hilog.info(LOG_DOMAIN, TAG, 'history dropped by generation: chat=%{public}s from=%{public}d',
+            `${chatId}`, fromMessageId);
+          return;
         }
         cache.loadingOlder = false;
         const typeObj: Object | undefined = update[TdField.TYPE];
@@ -440,7 +471,7 @@ export class MessageStore {
       })
       .catch((reason: string): void => {
         const cache: ChatMessageCache | undefined = this.caches.get(chatId);
-        if (cache !== undefined) {
+        if (cache !== undefined && cache.generation === generation) {
           cache.loadingOlder = false;
           this.notifyChanged(chatId);
         }
@@ -647,6 +678,7 @@ export class MessageStore {
   // ---------------- 缓存与排序 ----------------
 
   private createCache(chatId: number): ChatMessageCache {
+    this.cacheGenerationSeq += 1;
     const cache: ChatMessageCache = {
       chatId: chatId,
       messages: new Array<Record<string, Object>>(),
@@ -656,9 +688,11 @@ export class MessageStore {
       loadingOlder: false,
       lastReadOutboxId: 0,
       lastViewedMaxId: 0,
-      stale: false
+      stale: false,
+      generation: this.cacheGenerationSeq
     };
-    // 已读回执初值取 chat 对象存量游标（随后由 updateChatReadOutbox 增量推进）
+    // 已读回执初值取 chat 对象存量游标（随后由 updateChatReadOutbox 增量推进；
+    // M5 复审 LOW 修复：ChatListStore 已联动同步该存量字段，LRU 淘汰重建后种子不再陈旧）
     const chat: Record<string, Object> | undefined = ChatListStore.getInstance().getChat(chatId);
     if (chat !== undefined) {
       cache.lastReadOutboxId = this.readNumber(chat, TdField.LAST_READ_OUTBOX_MESSAGE_ID);
@@ -752,7 +786,7 @@ export class MessageStore {
     }
   }
 
-  /** messageText 纯文本提取（content.text.text；entities 富文本 M5 再渲染） */
+  /** messageText 纯文本提取（content.text.text；富文本渲染见 core/RichText，此处仅取纯文本供重发） */
   private extractText(message: Record<string, Object>): string {
     const content: Record<string, Object> | null = this.readRecord(message, TdField.CONTENT);
     if (content === null) {

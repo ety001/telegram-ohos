@@ -15,6 +15,8 @@ export class ChatRowModel {
   timeText: string = '';
   unreadText: string = '';
   pinned: boolean = false;
+  /** 免打扰中（notification_settings.mute_for > 0；行标记 + 未读角标置灰 + 菜单文案用） */
+  muted: boolean = false;
 }
 
 export class ChatUi {
@@ -82,6 +84,7 @@ export class ChatUi {
       row.unreadText = unreadObj > 99 ? '99+' : `${unreadObj}`;
     }
     row.pinned = ChatListStore.getInstance().isPinned(row.chatId);
+    row.muted = ChatListStore.getInstance().isMuted(row.chatId);
     return row;
   }
 

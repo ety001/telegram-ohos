@@ -29,6 +29,8 @@ const LOG_DOMAIN: number = 0x0012;
 const PAGE_SIZE: number = 50;
 const GET_CHATS_TIMEOUT_MS: number = 30000;
 const LOAD_CHATS_TIMEOUT_MS: number = 15000;
+/** 会话操作请求（置顶/静音/删除）的响应等待上限 */
+const CHAT_ACTION_TIMEOUT_MS: number = 15000;
 /** TDLib 表示「列表已全部加载」的错误（HTTP 语义 404 透传） */
 const ALL_LOADED_ERROR: string = 'not found';
 
@@ -100,6 +102,11 @@ export class ChatListStore {
     this.handleChatNotificationSettings(update);
   };
 
+  // 复审 LOW 修复（M5）：同步 chat.last_read_outbox_message_id 存量记录（见 handler 注释）
+  private readonly onChatReadOutbox: TdRouteHandler = (update: Record<string, Object>): void => {
+    this.handleChatReadOutbox(update);
+  };
+
   /**
    * 登录就绪后触发（幂等）：挂路由 + 拉首屏。
    * 极端时序（ready 与 start 之间恰好新产生会话导致 updateNewChat 先于注册到达）下
@@ -120,6 +127,7 @@ export class ChatListStore {
     router.register(TdUpdate.CHAT_TITLE, this.onChatTitle);
     router.register(TdUpdate.CHAT_PHOTO, this.onChatPhoto);
     router.register(TdUpdate.CHAT_NOTIFICATION_SETTINGS, this.onChatNotificationSettings);
+    router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
     hilog.info(LOG_DOMAIN, TAG, 'start: request first page, limit=%{public}d', PAGE_SIZE);
     this.requestFirstPage();
   }
@@ -179,6 +187,107 @@ export class ChatListStore {
     }
     const pinned: Object | undefined = position[TdField.IS_PINNED];
     return pinned === true;
+  }
+
+  /** 是否静音中（notification_settings.mute_for > 0；NotificationService.isMuted 同口径） */
+  isMuted(chatId: number): boolean {
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return false;
+    }
+    const settings: Record<string, Object> | null = this.readRecord(chat, TdField.NOTIFICATION_SETTINGS);
+    if (settings === null) {
+      return false;
+    }
+    return this.readNumber(settings, TdField.MUTE_FOR) > 0;
+  }
+
+  // ---------------- 会话操作（M5 菜单：置顶 / 静音 / 删除） ----------------
+
+  /**
+   * 置顶/取消置顶。结果由更新流驱动：toggleChatIsPinned 返回 ok 后 TDLib 下发
+   * updateChatPosition（order 含置顶权重）→ insertOrdered 自动重排，无需本地改状态。
+   */
+  togglePinned(chatId: number): void {
+    if (chatId === 0) {
+      return;
+    }
+    const chatList: Record<string, Object> = { ['@type']: TdChatList.MAIN };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.TOGGLE_CHAT_IS_PINNED,
+      'chat_list': chatList,
+      'chat_id': chatId,
+      'is_pinned': !this.isPinned(chatId)
+    };
+    this.sendChatAction(request, 'togglePin', chatId);
+  }
+
+  /**
+   * 静音（永久）/取消静音。基于 chat 现有 notification_settings 克隆改写 mute_for
+   * （1.8.63 chatNotificationSettings 字段全集透传，避免覆盖其它设置——声音/预览等）；
+   * use_default_mute_for 必须显式置 false，否则 TDLib 用默认值覆盖 mute_for。
+   * 结果由 updateChatNotificationSettings 驱动（已有 handler 整体替换）。
+   */
+  setMuted(chatId: number, muted: boolean): void {
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chatId === 0 || chat === undefined) {
+      return;
+    }
+    const existing: Record<string, Object> | null = this.readRecord(chat, TdField.NOTIFICATION_SETTINGS);
+    const settings: Record<string, Object> = {};
+    if (existing !== null) {
+      // 浅拷贝现有设置全集（Record 无 forEach，经 Object.keys 逐键复制）
+      const keys: Array<string> = Object.keys(existing);
+      for (const key of keys) {
+        settings[key] = existing[key];
+      }
+    }
+    settings[TdField.USE_DEFAULT_MUTE_FOR] = false;
+    // 永久静音 = int32 上限（官方客户端同款口径）；取消静音 = 0
+    settings[TdField.MUTE_FOR] = muted ? 2147483647 : 0;
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SET_CHAT_NOTIFICATION_SETTINGS,
+      'chat_id': chatId,
+      'notification_settings': settings
+    };
+    this.sendChatAction(request, 'setMuted', chatId);
+  }
+
+  /**
+   * 删除会话（deleteChat）。私聊/群聊均会删除该会话全部消息，群聊还对所有成员生效
+   * （能否删由 chat.can_be_deleted_for_all_users 决定，被拒仅告警）；
+   * 列表移除由 updateChatPosition(order=0) 驱动。
+   */
+  deleteChat(chatId: number): void {
+    if (chatId === 0) {
+      return;
+    }
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.DELETE_CHAT,
+      'chat_id': chatId
+    };
+    this.sendChatAction(request, 'deleteChat', chatId);
+  }
+
+  /**
+   * 会话动作统一发送：带 @extra 等待直接回复，被拒/超时仅记动作名与 chatId
+   * （错误文案可能携带会话上下文，不打日志）。
+   */
+  private sendChatAction(request: Record<string, Object>, action: string, chatId: number): void {
+    this.actionSeq += 1;
+    const extra: string = `chatAction_${this.actionSeq}`;
+    request[TdField.EXTRA] = extra;
+    TdUpdateRouter.getInstance().waitForExtra(extra, CHAT_ACTION_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        if (typeObj === ErrorType.INVALID) {
+          hilog.warn(LOG_DOMAIN, TAG, 'chat action rejected: action=%{public}s chat=%{public}d', action, chatId);
+        }
+      })
+      .catch((reason: string): void => {
+        hilog.warn(LOG_DOMAIN, TAG, 'chat action timeout: action=%{public}s chat=%{public}d', action, chatId);
+      });
+    TdClient.getInstance().send(request);
   }
 
   canLoadMore(): boolean {
@@ -429,6 +538,29 @@ export class ChatListStore {
     this.notifyChanged();
   }
 
+  /**
+   * updateChatReadOutbox（M5 复审 LOW 修复）：把 outbox 已读游标同步进 chat 存量记录。
+   * 背景：MessageStore 缓存被 LRU 淘汰后重建（createCache）以 chat.last_read_outbox_message_id
+   * 为已读游标种子——本仓库此前只在 updateNewChat 全量入库时拿到该字段，缓存存活期间到达的
+   * outbox 推进不会落进本表，淘汰重建后已读双勾会回退到陈旧游标。此处按 max 单调同步，
+   * MessageStore 自身的增量 handler 仍在（双通道，语义一致）。
+   * 列表 UI 不消费该字段：不触发 UI 通知（省一次无意义重建）。
+   */
+  private handleChatReadOutbox(update: Record<string, Object>): void {
+    const chatId: number = this.readChatId(update);
+    if (chatId === 0) {
+      return;
+    }
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return;
+    }
+    const lastRead: number = this.readNumber(update, TdField.LAST_READ_OUTBOX_MESSAGE_ID);
+    if (lastRead > this.readNumber(chat, TdField.LAST_READ_OUTBOX_MESSAGE_ID)) {
+      chat[TdField.LAST_READ_OUTBOX_MESSAGE_ID] = lastRead;
+    }
+  }
+
   // ---------------- 排序（chatListMain，(order, chat_id) 降序） ----------------
 
   /** 全量重建（首屏 chats 结果 / 兜底）：O(n log n) */
@@ -561,6 +693,14 @@ export class ChatListStore {
       ? source[TdField.CHAT_ID] : source[TdField.ID];
     if (typeof idObj === 'number' && Number.isFinite(idObj) && idObj !== 0) {
       return idObj;
+    }
+    return 0;
+  }
+
+  private readNumber(source: Record<string, Object>, field: string): number {
+    const value: Object | undefined = source[field];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
     }
     return 0;
   }
