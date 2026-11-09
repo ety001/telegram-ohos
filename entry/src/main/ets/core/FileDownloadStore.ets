@@ -17,8 +17,12 @@
  *   active（is_downloading_active，progress = downloaded_size/expected_size 百分比）
  *   ready（is_downloading_completed && path 非空）
  *   failed（downloadFile 响应 error / 超时兜底——updateFile 仍在流动时不误判）
+ *   idle 终态出口（M3-media 复审修复）：active=false 且未完成的 updateFile 即 TDLib 侧任务
+ *   终止（取消/出错）——乐观置位的 ACTIVE 降级 IDLE，否则条目永久卡 ACTIVE 且被去重拦截；
+ *   响应超时/发送失败且 TDLib 从未驱动过该下载（tdDriven=false）时同样救济降级。
  *   trackFile：消息 content 自带的 file 对象（TDLib 自动下载或历史缓存）直接入表做种子，
  *   后续 updateFile 天然接续。
+ *   淘汰：条目超阈值时按插入序淘汰非 active/ready 条目（简单版，见 evictStale）。
  *
  * 日志红线：本地路径/文件名不入日志（路径含 TDLib 沙盒文件名，可能带用户内容特征），仅记 fileId/进度。
  */
@@ -32,6 +36,8 @@ const TAG: string = 'FileDownloadStore';
 const LOG_DOMAIN: number = 0x0012;
 /** downloadFile 响应等待上限：响应只做 error 检出与瞬时快照，超时不判失败（updateFile 仍在推） */
 const DOWNLOAD_RESPONSE_TIMEOUT_MS: number = 30000;
+/** 条目数上限：超阈值淘汰非 active/ready 条目（防长会话媒体消息无限增长） */
+const MAX_TRACKED_FILES: number = 200;
 /** 下载优先级（TDLib 1-32）：媒体自动预载低优先，用户点击触发的下载最高 */
 export class DownloadPriority {
   static readonly THUMBNAIL: number = 8;
@@ -55,6 +61,8 @@ interface DownloadEntry {
   progress: number;
   /** 本地绝对路径（ready 态非空） */
   path: string;
+  /** TDLib 侧已确认该下载在流（本次请求后见过 active=true 的 file 推送/响应快照） */
+  tdDriven: boolean;
 }
 
 export type FileDownloadObserver = (fileId: number) => void;
@@ -126,6 +134,7 @@ export class FileDownloadStore {
     const entry: DownloadEntry | undefined = this.entries.get(fileId);
     if (entry !== undefined) {
       entry.state = DownloadState.ACTIVE; // 请求已发出（IDLE/FAILED 允许重发）
+      entry.tdDriven = false; // tdDriven 只对本次请求生效（重发重新观察 TDLib 驱动）
     }
     this.seq += 1;
     const extra: string = `downloadFile_${this.seq}`;
@@ -146,8 +155,17 @@ export class FileDownloadStore {
         this.applyFile(update);
       })
       .catch((reason: string): void => {
-        // 响应超时不判失败：updateFile 进度流仍在（慢网络大文件常态）
-        hilog.warn(LOG_DOMAIN, TAG, 'downloadFile no response: file=%{public}d', fileId);
+        // 救济（M3-media 复审修复）：响应超时/发送失败时，ACTIVE 且 TDLib 从未驱动过该下载
+        // （tdDriven=false，无任何 active 流）的条目降级 IDLE——否则永久卡 ACTIVE 且去重拦截后续请求。
+        // TDLib 已驱动的活跃下载不降级（慢网络大文件无响应流动属常态，误判会反复重发）。
+        const entry: DownloadEntry | undefined = this.entries.get(fileId);
+        if (entry !== undefined && entry.state === DownloadState.ACTIVE && !entry.tdDriven) {
+          entry.state = DownloadState.IDLE;
+          entry.progress = -1;
+          this.notify(fileId);
+        }
+        hilog.warn(LOG_DOMAIN, TAG, 'downloadFile no response: file=%{public}d reason=%{public}s',
+          fileId, reason);
       });
     const request: Record<string, Object> = {
       ['@type']: TdReq.DOWNLOAD_FILE,
@@ -158,7 +176,15 @@ export class FileDownloadStore {
       'synchronous': false
     };
     request[TdField.EXTRA] = extra;
-    TdClient.getInstance().send(request);
+    // send 异常防御（M3-media 复审修复）：TdClient.send 抛错不穿透 UI 动作方法；
+    // 带 waiter 的请求须显式作废等待者（清 timer + reject），让 catch 分支立即救济降级。
+    try {
+      TdClient.getInstance().send(request);
+    } catch (err) {
+      TdUpdateRouter.getInstance().rejectExtra(extra, 'downloadFile send failed');
+      hilog.error(LOG_DOMAIN, TAG, 'downloadFile send failed: file=%{public}d err=%{private}s',
+        fileId, JSON.stringify(err));
+    }
     hilog.info(LOG_DOMAIN, TAG, 'downloadFile: file=%{public}d priority=%{public}d', fileId, priority);
   }
 
@@ -233,9 +259,39 @@ export class FileDownloadStore {
     if (this.entries.has(fileId)) {
       return false;
     }
-    const entry: DownloadEntry = { fileId: fileId, state: DownloadState.IDLE, progress: -1, path: '' };
+    this.evictStale(fileId);
+    const entry: DownloadEntry = { fileId: fileId, state: DownloadState.IDLE, progress: -1, path: '', tdDriven: false };
     this.entries.set(fileId, entry);
     return true;
+  }
+
+  /**
+   * 简单淘汰（M3-media 复审 LOW 修复）：条目超阈值时按插入序（近似最旧）淘汰
+   * 非 ACTIVE/READY 条目——active 进行中不可动，ready 供缓存复用；
+   * 可淘汰项不足时允许超限（不做强拆，优先正确性）。被淘汰的 idle/failed 条目
+   * 由后续 trackFile/downloadFile 重建，updateFile 对未跟踪 id 的推送天然忽略。
+   */
+  private evictStale(keepFileId: number): void {
+    if (this.entries.size < MAX_TRACKED_FILES) {
+      return;
+    }
+    const surplus: number = this.entries.size - MAX_TRACKED_FILES + 1;
+    const victims: Array<number> = [];
+    this.entries.forEach((entry: DownloadEntry, id: number): void => {
+      if (id === keepFileId || victims.length >= surplus) {
+        return;
+      }
+      if (entry.state !== DownloadState.ACTIVE && entry.state !== DownloadState.READY) {
+        victims.push(id);
+      }
+    });
+    for (const id of victims) {
+      this.entries.delete(id);
+    }
+    if (victims.length > 0) {
+      hilog.info(LOG_DOMAIN, TAG, 'evicted stale entries: count=%{public}d total=%{public}d',
+        victims.length, this.entries.size);
+    }
   }
 
   /** file 对象 → 状态机推进（updateFile 与 downloadFile 响应共用；未跟踪 id 忽略） */
@@ -278,6 +334,15 @@ export class FileDownloadStore {
     let demoted: boolean = false;
     if (active) {
       entry.state = DownloadState.ACTIVE;
+      entry.tdDriven = true; // TDLib 已确认在流：响应超时救济不再降级
+    } else if (entry.state === DownloadState.ACTIVE) {
+      // 终态出口（M3-media 复审修复）：active=false 且未完成 = TDLib 侧任务终止（取消/出错）。
+      // 乐观置位的 ACTIVE 必须降级，否则永久卡 ACTIVE 且被 downloadFile 去重拦截后续请求；
+      // 进度归 -1（局部字节仍在沙盒，重发时 TDLib 续传，不丢数据）。
+      entry.state = DownloadState.IDLE;
+      entry.tdDriven = false;
+      entry.progress = -1;
+      demoted = true;
     } else if (entry.state === DownloadState.FAILED) {
       // 保持 failed（等待用户侧重发 downloadFile）
     } else if (entry.state === DownloadState.READY) {
@@ -287,8 +352,10 @@ export class FileDownloadStore {
       entry.progress = -1;
       demoted = true;
     }
-    // 非 active 非 completed 非 failed：TDLib 侧下载被取消/尚未开始，保留现进度等下一次驱动
-    entry.progress = progress >= 0 ? progress : entry.progress;
+    // 降级条目不保留旧进度（无活跃下载却显示百分比会误导读进度）；未降级时进度只增不减
+    if (!demoted) {
+      entry.progress = progress >= 0 ? progress : entry.progress;
+    }
     if (stateChanged || progressChanged || demoted) {
       this.notify(fileId);
     }

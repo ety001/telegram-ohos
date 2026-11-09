@@ -166,6 +166,7 @@ export class TdField {
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）
   // 注意：messagePhoto.photo 复用上方 chat.photo 的 PHOTO 常量（同名同值）
   static readonly VIDEO: string = 'video';
+  static readonly VIDEO_NOTE: string = 'video_note';
   static readonly DOCUMENT: string = 'document';
   static readonly VOICE_NOTE: string = 'voice_note';
   static readonly ANIMATION: string = 'animation';

@@ -158,7 +158,7 @@ export class MessageContent {
   static extractVideo(content: Record<string, Object>): VideoInfo | null {
     const video: Record<string, Object> | null = MessageContent.asRecord(content[TdField.VIDEO]);
     if (video === null) {
-      const note: Record<string, Object> | null = MessageContent.asRecord(content['video_note']);
+      const note: Record<string, Object> | null = MessageContent.asRecord(content[TdField.VIDEO_NOTE]);
       if (note === null) {
         return null;
       }

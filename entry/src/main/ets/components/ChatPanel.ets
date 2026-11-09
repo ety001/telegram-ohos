@@ -159,6 +159,9 @@ export struct ChatPanel {
     // 全屏媒体覆盖层：图片 pinch 预览 / AVPlayer 播放（三断点同一份，随组件三形态复用）
     .bindContentCover(this.overlayKind !== OverlayKind.NONE, this.mediaOverlayBuilder(), {
       modalTransition: ModalTransition.DEFAULT,
+      // 全屏覆盖层适配安全区（API 20+，工程 targetApi 26 可用）：内容约束在安全区内，
+      // 避免顶栏/控制条被状态栏与导航条遮挡
+      enableSafeArea: true,
       onWillDismiss: (action: DismissContentCoverAction): void => {
         this.closeOverlay();
         action.dismiss();
@@ -430,6 +433,10 @@ export struct ChatPanel {
         bubble.photoHeight = photo.selected.height;
         bubble.photoMini = photo.miniData.length > 0 ? `data:image/jpeg;base64,${photo.miniData}` : '';
         files.trackFile(photo.selected.file);
+      } else if (photo !== null && photo.miniData.length > 0) {
+        // 无 sizes 只有 minithumbnail（M3-media 复审修复）：mini 先行灰底显示（无下载目标可拉）
+        bubble.mediaKind = kind;
+        bubble.photoMini = `data:image/jpeg;base64,${photo.miniData}`;
       } else {
         bubble.placeholder = '[图片]';
       }
@@ -443,6 +450,9 @@ export struct ChatPanel {
         bubble.videoThumbFileId = video.thumbFileId;
         bubble.videoThumbWidth = video.thumbWidth;
         bubble.videoThumbHeight = video.thumbHeight;
+        // 本体宽高透传：无 thumbnail 时气泡按视频原生比例估高（复审修复）
+        bubble.videoWidth = video.width;
+        bubble.videoHeight = video.height;
         bubble.videoMini = video.miniData.length > 0 ? `data:image/jpeg;base64,${video.miniData}` : '';
         files.trackFile(video.videoFile);
         files.trackFile(video.thumbFile);

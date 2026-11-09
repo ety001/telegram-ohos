@@ -66,6 +66,9 @@ export class MessageBubbleModel {
   videoThumbFileId: number = 0;
   videoThumbWidth: number = 0;
   videoThumbHeight: number = 0;
+  /** 视频本体宽高（无 thumbnail 时气泡按原生比例估高） */
+  videoWidth: number = 0;
+  videoHeight: number = 0;
   videoFileId: number = 0;
   videoFileName: string = '';
   videoDurationText: string = '';
@@ -112,13 +115,19 @@ export struct MessageBubble {
   @State photoReady: boolean = false;
   @State photoUri: string = '';
   @State photoProgress: number = -1;
+  @State photoFailed: boolean = false;
   @State thumbReady: boolean = false;
   @State thumbUri: string = '';
   @State videoProgress: number = -1;
   @State videoDownloading: boolean = false;
   @State docState: string = DocActionState.IDLE;
   @State docProgress: number = -1;
-  /** 用户已点击（下载完成即自动接续动作：视频播放 / 文件保存） */
+  /**
+   * 用户已点击（下载完成即自动接续动作：视频播放 / 文件保存）。
+   * 已知限制（M3-media 复审固化，不修）：组件私有标志在气泡滚出复用/重建后丢失，
+   * 届时下载仍由 FileDownloadStore 层继续（无泄漏），仅"完成后自动拉起"不触发，
+   * 用户再次点击即走 ready 快速路径；若需跨组件续动作可上移到 store 层（M5）。
+   */
   private videoRequested: boolean = false;
   private docRequested: boolean = false;
 
@@ -189,6 +198,10 @@ export struct MessageBubble {
               .objectFit(ImageFit.Cover)
               .width(MEDIA_WIDTH)
               .height(this.mediaHeight())
+              // 解码降采样（M3-media 复审修复）：仅目标小于源图时生效（mini 小图不受影响，
+              // 无放大副作用）。上限取展示尺寸 2 倍（240vp 宽 / 320vp 高上限），1080 档照片
+              // 解码内存约降 3/4，画质在 240vp 泡内无肉眼差异；全屏预览走独立 Image 不受限
+              .sourceSize({ width: MEDIA_WIDTH * 2, height: MEDIA_MAX_HEIGHT * 2 })
               .borderRadius(12)
               .clip(true)
           } else {
@@ -413,6 +426,14 @@ export struct MessageBubble {
   // ---------------- 点击动作 ----------------
 
   private handlePhotoClick(): void {
+    // FAILED 补救（M3-media 复审修复）：图片为自动预载，失败后无自愈路径——点击重拉一次
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    const fileId: number = this.model.photoFileId;
+    if (fileId !== 0 && store.isFailed(fileId) && !store.isActive(fileId)) {
+      store.downloadFile(fileId, DownloadPriority.USER_ACTION, 0, 0);
+      this.refreshPhotoState();
+      return;
+    }
     const src: string = this.photoReady && this.photoUri.length > 0 ? this.photoUri : this.model.photoMini;
     if (src.length > 0) {
       this.onPhotoOpen(src);
@@ -495,6 +516,7 @@ export struct MessageBubble {
     this.photoReady = fileId !== 0 && store.isReady(fileId);
     this.photoUri = this.photoReady ? store.getReadyUri(fileId) : '';
     this.photoProgress = fileId === 0 ? -1 : store.getProgress(fileId);
+    this.photoFailed = fileId !== 0 && store.isFailed(fileId);
   }
 
   private refreshThumbState(): void {
@@ -572,6 +594,8 @@ export struct MessageBubble {
     if (this.model.mediaKind === MediaKind.VIDEO) {
       if (this.model.videoThumbWidth > 0 && this.model.videoThumbHeight > 0) {
         ratio = this.model.videoThumbWidth / this.model.videoThumbHeight;
+      } else if (this.model.videoWidth > 0 && this.model.videoHeight > 0) {
+        ratio = this.model.videoWidth / this.model.videoHeight; // 无 thumbnail：按本体原生比例（复审修复）
       }
     } else if (this.model.photoWidth > 0 && this.model.photoHeight > 0) {
       ratio = this.model.photoWidth / this.model.photoHeight;
@@ -590,6 +614,9 @@ export struct MessageBubble {
         return this.videoProgress >= 0 ? `下载中 ${this.videoProgress}%` : '下载中…';
       }
       return '';
+    }
+    if (this.photoFailed && !this.photoReady) {
+      return '下载失败 点击重试';
     }
     if (!this.photoReady && this.photoProgress >= 0) {
       return `${this.photoProgress}%`;

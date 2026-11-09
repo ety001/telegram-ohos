@@ -41,12 +41,26 @@ export class TdClient {
     return this.clientId;
   }
 
-  /** 异步请求（td_send）：回复经更新流送达；可带 @extra 配合 Router.waitForExtra */
+  /**
+   * 异步请求（td_send）：回复经更新流送达；可带 @extra 配合 Router.waitForExtra。
+   *
+   * 异常契约（M3-media 复审修复）：桥侧异常记日志后原样上抛，不做静默吞掉——
+   * 带 waiter 的调用方（如 FileDownloadStore.downloadFile）须 try-catch 并 rejectExtra，
+   * 让等待方立即进入救济路径；静默会让等待者挂到超时才降级。
+   * dispose 的 close 发送自行 try-catch（进程退出场景，无需上抛）。
+   */
   send(request: Record<string, Object>): void {
     if (this.disposed) {
       return;
     }
-    send(this.clientId, JSON.stringify(request));
+    try {
+      send(this.clientId, JSON.stringify(request));
+    } catch (err) {
+      hilog.error(LOG_DOMAIN, TAG, 'td_send failed: type=%{public}s err=%{private}s',
+        `${request[TdField.TYPE]}`, JSON.stringify(err));
+      // 原样上抛（包装为 Error 保持异常链语义，调用方按契约处理：waiter 调用方 rejectExtra）
+      throw new Error(`td_send failed for ${request[TdField.TYPE]}`);
+    }
   }
 
   /**

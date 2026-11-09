@@ -5,11 +5,29 @@
  *   无平移/双击/惯性，复杂手势 M5）；点击背景或右上角关闭。
  * - VideoPlayCover：视频全屏播放。XComponent(SURFACE) 提供 surfaceId，VideoPlayerController
  *   驱动 AVPlayer（fd:// 沙盒文件）；控制条：关闭 / 播放暂停 / 时长。
- *   surface 就绪时序防御：onLoad 事件 + 定时兜底双通道取 surfaceId（真机验证项）。
+ *   surface 就绪时序：XComponentController 子类 onSurfaceCreated(id) 官方推荐通道为主
+ *   （官方文档明示 onLoad 早于 onSurfaceCreated，onLoad 期取 surfaceId 不可靠——复审修复），
+ *   onLoad 取值 + 300ms 定时兜底保留为附加防御。
  */
 import { VideoPlayerController, PlayerState } from '../core/VideoPlayerController';
 import { MessageContent } from '../core/MessageContent';
 import { ChatUi } from '../pages/ChatUi';
+
+/**
+ * XComponentController 子类：surface 创建完成的官方回调通道（API 12+）。
+ * onLoad 触发时 surface 尚未创建（官方文档时序：onLoad → onSurfaceCreated），
+ * 子类覆写 onSurfaceCreated(surfaceId) 才是可靠的 surfaceId 获取时机。
+ */
+class VideoSurfaceController extends XComponentController {
+  /** surface 创建回调（宿主组件注入；置 null 即解绑） */
+  onReady: ((surfaceId: string) => void) | null = null;
+
+  onSurfaceCreated(surfaceId: string): void {
+    if (this.onReady !== null) {
+      this.onReady(surfaceId);
+    }
+  }
+}
 
 /** 预览图源（data URI 或应用沙盒 file URI，均直接喂 Image） */
 @Component
@@ -76,7 +94,7 @@ export struct VideoPlayCover {
   @State playerState: string = PlayerState.IDLE;
   @State durationText: string = '';
   private controller: VideoPlayerController = new VideoPlayerController();
-  private surfaceController: XComponentController = new XComponentController();
+  private surfaceController: VideoSurfaceController = new VideoSurfaceController();
   private surfaceReady: boolean = false;
   private surfaceFallbackTimer: number = -1;
 
@@ -88,14 +106,19 @@ export struct VideoPlayCover {
         this.durationText = ms > 0 ? MessageContent.formatDuration(Math.floor(ms / 1000)) : '';
       }
     });
+    // 官方推荐通道：surface 创建完成回调（onLoad 期 surface 尚未创建，取值不可靠）
+    this.surfaceController.onReady = (surfaceId: string): void => {
+      this.onSurfaceReady(surfaceId);
+    };
     this.controller.open(this.path);
-    // surface 就绪兜底：onLoad 未触发时（API 差异防御）延迟轮询一次 controller
+    // surface 就绪附加防御：官方回调缺失时（API 差异）onLoad + 延迟轮询兜底
     this.surfaceFallbackTimer = setTimeout((): void => {
       this.tryBindSurface();
     }, 300);
   }
 
   aboutToDisappear(): void {
+    this.surfaceController.onReady = null;
     if (this.surfaceFallbackTimer >= 0) {
       clearTimeout(this.surfaceFallbackTimer);
       this.surfaceFallbackTimer = -1;
@@ -103,6 +126,16 @@ export struct VideoPlayCover {
     this.controller.release();
   }
 
+  /** 官方通道：XComponent surface 创建完成（surfaceId 由回调参数直给） */
+  private onSurfaceReady(surfaceId: string): void {
+    if (this.surfaceReady || surfaceId.length === 0) {
+      return;
+    }
+    this.surfaceReady = true;
+    this.controller.setSurface(surfaceId);
+  }
+
+  /** 兜底通道：onLoad/定时器经 getXComponentSurfaceId 主动查询 */
   private tryBindSurface(): void {
     if (this.surfaceReady) {
       return;

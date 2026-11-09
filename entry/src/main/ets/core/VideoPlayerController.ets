@@ -3,8 +3,10 @@
  *
  * 状态机（media.AVPlayer 官方流转，surface 渲染）：
  *   createAVPlayer(idle) → 设 url=fd://xx（必须 idle 态）→ initialized
- *   → 设 surfaceId（首次仅 initialized 态可设）→ prepare → prepared → play → playing
+ *   → 设 surfaceId → prepare → prepared → play → playing
  *   paused ⇄ playing；completed；error → release
+ *   surfaceId 官方契约：initialized 态首次设置；prepared/playing/paused/completed/stopped
+ *   态可更新（晚到 surface 按此重设恢复渲染，消除永久黑屏竞态——M3-media 复审修复）
  *
  * fd 生命周期：fs.openSync 打开后移交 AVPlayer 独占使用（官方约束：fd 不得同时用于其他读写），
  * release 完成后再 closeSync。
@@ -90,8 +92,23 @@ export class VideoPlayerController {
           hilog.error(LOG_DOMAIN, TAG, 'player error: code=%{public}d', err.code);
           this.setState(PlayerState.ERROR);
         });
-        this.srcFile = fileIo.openSync(localPath, fileIo.OpenMode.READ_ONLY);
-        player.url = `fd://${this.srcFile.fd}`; // idle → initialized（stateChange 接续）
+        // 打开本地文件单独兜底（M3-media 复审修复）：失败不误标 createAVPlayer failed，
+        // 释放实例并转 ERROR（fd 未打开无泄漏）
+        let fd: number = -1;
+        try {
+          const opened: fileIo.File = fileIo.openSync(localPath, fileIo.OpenMode.READ_ONLY);
+          this.srcFile = opened;
+          fd = opened.fd;
+        } catch (err) {
+          const be: BusinessError = err as BusinessError;
+          hilog.error(LOG_DOMAIN, TAG, 'open local file failed: code=%{public}d', be.code);
+          this.player = null;
+          player.release().catch((): void => {
+          });
+          this.setState(PlayerState.ERROR);
+          return;
+        }
+        player.url = `fd://${fd}`; // idle → initialized（stateChange 接续）
       })
       .catch((err: BusinessError): void => {
         hilog.error(LOG_DOMAIN, TAG, 'createAVPlayer failed: code=%{public}d', err.code);
@@ -170,28 +187,39 @@ export class VideoPlayerController {
         this.setState(PlayerState.ERROR);
       });
     } else if (state === 'prepared') {
+      this.applySurfaceIfReady(); // 晚到 surface：官方允许 prepared 态重设
       player.play().catch((err: BusinessError): void => {
         hilog.error(LOG_DOMAIN, TAG, 'play failed: code=%{public}d', err.code);
         this.setState(PlayerState.ERROR);
       });
     } else if (state === 'playing') {
+      this.applySurfaceIfReady(); // 官方允许 playing 态重设
       this.setState(PlayerState.PLAYING);
     } else if (state === 'paused') {
+      this.applySurfaceIfReady(); // 官方允许 paused 态重设
       this.setState(PlayerState.PAUSED);
     } else if (state === 'completed') {
+      this.applySurfaceIfReady(); // 官方允许 completed 态重设
       this.setState(PlayerState.COMPLETED);
     } else if (state === 'error') {
       this.setState(PlayerState.ERROR);
     }
   }
 
-  /** surfaceId 首次仅 initialized 态可设：initialized 已到且 surface 已知即设置 */
+  /**
+   * surfaceId 官方契约：initialized 态首次设置；prepared/playing/paused/completed/stopped
+   * 态可更新。surfaceId 晚于 initialized 到达的竞态（原实现守卫过严 → 永久黑屏）由此消除：
+   * 状态机每次推进到可设态都重试绑定（M3-media 复审修复）。
+   */
   private applySurfaceIfReady(): void {
     const player: media.AVPlayer | null = this.player;
-    if (player === null || this.surfaceId.length === 0) {
+    if (player === null || this.releasing || this.surfaceId.length === 0) {
       return;
     }
-    if (player.state === 'initialized' && player.surfaceId === undefined) {
+    const state: media.AVPlayerState = player.state;
+    const settable: boolean = state === 'initialized' || state === 'prepared' || state === 'playing' ||
+      state === 'paused' || state === 'completed' || state === 'stopped';
+    if (settable && player.surfaceId !== this.surfaceId) {
       player.surfaceId = this.surfaceId;
     }
   }
