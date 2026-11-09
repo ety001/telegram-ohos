@@ -19,6 +19,7 @@ import { AuthStateType } from '../core/TdConstants';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { MessageStore } from '../core/MessageStore';
 import { FileDownloadStore } from '../core/FileDownloadStore';
+import { NotificationService, ChatRouteObserver } from '../core/NotificationService';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
@@ -101,12 +102,21 @@ struct Index {
     this.loggedIn = appState === AppAuthState.READY;
     this.syncChatStoreLifecycle(appState);
     this.handleAuthRoute(appState);
+    // 通知点击路由：消费时机收敛到登录就绪（READY）——未登录态不消费、pending 保留到登录完成，
+    // 防冷启动点击被认证中间态静默吞掉（复审 HIGH-1）；防重靠 pending 取出即清，天然幂等
+    if (appState === AppAuthState.READY) {
+      this.applyPendingNotificationChat();
+    }
   };
   private readonly breakpointObserver: BreakpointObserver = (breakpoint: string): void => {
     this.breakpoint = breakpoint;
   };
   private readonly listObserver: ChatListObserver = (): void => {
     this.refreshVisibleCount();
+  };
+  // 通知点击路由（应用存活时 EntryAbility.onNewWant → 观察者直达）
+  private readonly notificationChatObserver: ChatRouteObserver = (chatId: number): void => {
+    this.openNotificationChat(chatId);
   };
 
   aboutToAppear(): void {
@@ -115,13 +125,18 @@ struct Index {
     AuthService.getInstance().onAuthState(this.authObserver);
     BreakpointTool.getInstance().addObserver(this.breakpointObserver);
     ChatListStore.getInstance().addObserver(this.listObserver);
+    NotificationService.getInstance().addChatRouteObserver(this.notificationChatObserver);
     this.refreshVisibleCount();
+    // 冷启动点击通知：EntryAbility.onCreate 已暂存 chatId；此时通常未登录（applyPending 内
+    // 守卫不消费），待 authState 流转到 READY 由 authObserver 消费路由（复审 HIGH-1）
+    this.applyPendingNotificationChat();
   }
 
   aboutToDisappear(): void {
     AuthService.getInstance().offAuthState(this.authObserver);
     BreakpointTool.getInstance().removeObserver(this.breakpointObserver);
     ChatListStore.getInstance().removeObserver(this.listObserver);
+    NotificationService.getInstance().removeChatRouteObserver(this.notificationChatObserver);
     this.dataSource.dispose();
   }
 
@@ -131,10 +146,12 @@ struct Index {
       ChatListStore.getInstance().start();
       MessageStore.getInstance().start();
       FileDownloadStore.getInstance().start();
+      NotificationService.getInstance().start();
     } else {
       ChatListStore.getInstance().reset();
       MessageStore.getInstance().reset();
       FileDownloadStore.getInstance().reset();
+      NotificationService.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
     }
@@ -243,6 +260,59 @@ struct Index {
     // md/lg：右侧聊天区内嵌 ChatPanel（消息流 + 输入区，与 sm ChatPage 复用同一组件）
     this.selectedChatId = row.chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(row.chatId);
+  }
+
+  /**
+   * 通知点击路由目标会话（wantAgent → EntryAbility onCreate/onNewWant → 本方法）：
+   * 登录态才路由（未登录静默返回，暂存 pending 由 authState READY 时再消费，见 applyPendingNotificationChat）；
+   * sm 推 ChatPage（推前先栈归一化：栈内至多一个 ChatPage 且 Index 页常驻栈底），
+   * md/lg 选中右侧聊天区（子页面在栈上时先退回本页）。
+   */
+  private openNotificationChat(chatId: number): void {
+    if (chatId === 0 || !this.loggedIn) {
+      return;
+    }
+    // 本方法即直达消费点：路由成立即清掉 handleLaunchWant 暂存的 pending。必须在下方
+    // 栈归一化之前清——replaceUrl 重建 Index 时 onAuthState「订阅即回放」当前 ready 态，
+    // 新实例会再消费一次 pending；不清则重复 push ChatPage，破坏「至多一个 ChatPage」不变式。
+    NotificationService.getInstance().consumePendingChatId();
+    if (this.breakpoint === Breakpoint.SM) {
+      // 栈归一化（复审 MEDIUM-3）：栈上已有 ChatPage/子页面时无条件 push 会堆出
+      // [Index, ChatPage(B), ChatPage(A)]——底层 ChatPanel(B) 残留「正在看 B」假象、
+      // 返回 B 时 activeChat=0 误恢复通知、双 ChatPanel 实例重复已读上报。
+      // clear() 只保留当前页 + replaceUrl 重建唯一 Index（沿 READY 分支的清栈惯例，
+      // 被销毁页面经各自 aboutToDisappear 解除接线），再 push 目标会话——结果恒为 [Index, ChatPage]。
+      if (Number.parseInt(router.getLength()) > 1) {
+        router.clear();
+        router.replaceUrl({ url: 'pages/Index' });
+      }
+      const params: Record<string, Object> = { 'chatId': chatId };
+      router.pushUrl({ url: PAGE_CHAT, params: params }).catch((err: Error): void => {
+        console.error(`route to chat failed: ${err.message}`);
+      });
+      return;
+    }
+    // md/lg：设置页/登录流程页等子页面在栈上时先回本页（Index 为栈底，单次 back 即达）
+    if (Number.parseInt(router.getLength()) > 1) {
+      router.back();
+    }
+    this.selectedChatId = chatId;
+    this.selectedChatTitle = ChatListStore.getInstance().getTitle(chatId);
+  }
+
+  /**
+   * 消费通知点击暂存的会话（取出即清，pending 置 0 后重复调用天然无副作用）。
+   * 未登录直接 return 不消费（复审 HIGH-1）：冷启动点击通知常早于登录完成到达，此时取出
+   * 会因 openNotificationChat 的登录守卫静默丢弃——保留 pending 至 authState READY 再消费。
+   */
+  private applyPendingNotificationChat(): void {
+    if (!this.loggedIn) {
+      return;
+    }
+    const chatId: number = NotificationService.getInstance().consumePendingChatId();
+    if (chatId !== 0) {
+      this.openNotificationChat(chatId);
+    }
   }
 
   build() {

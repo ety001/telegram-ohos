@@ -13,6 +13,8 @@
  * - voiceNote = duration / waveform / mime_type / speech_recognition_result / voice:file。
  *
  * 本文件只做纯数据投影（不改 TDLib 原对象），视图模型与下载状态由消费侧组装。
+ * M3-notifications 增补 previewTextOf/contentPlaceholderOf：单行预览提取下沉 core，
+ * 会话列表行（ChatUi）与本地通知正文（NotificationService）共用一份。
  */
 import { TdField, TdMessageContent } from './TdConstants';
 
@@ -252,6 +254,60 @@ export class MessageContent {
       return '';
     }
     return MessageContent.readString(formatted, TdField.TEXT);
+  }
+
+  /**
+   * 消息单行预览（会话列表行 / 本地通知正文共用，M3-notifications 下沉至 core）：
+   * messageText → 压空白单行；媒体类型给中文占位文案；未知类型回退 [消息]。
+   * 截断由调用方按展示位宽自定（通知 80 字 / 列表行 maxLines+ellipsis）。
+   */
+  static previewTextOf(message: Record<string, Object>): string {
+    const content: Record<string, Object> | null = MessageContent.asRecord(message[TdField.CONTENT]);
+    if (content === null) {
+      return '';
+    }
+    const typeObj: Object | undefined = content[TdField.TYPE];
+    const type: string = typeof typeObj === 'string' ? typeObj : '';
+    if (type === TdMessageContent.TEXT) {
+      const formatted: Record<string, Object> | null = MessageContent.asRecord(content[TdField.TEXT]);
+      if (formatted === null) {
+        return '';
+      }
+      // 多行文本压成单行预览
+      return MessageContent.readString(formatted, TdField.TEXT).replace(/\s+/g, ' ').trim();
+    }
+    return MessageContent.contentPlaceholderOf(type);
+  }
+
+  /** 媒体/特殊内容类型的预览占位文案（未知新类型回退 [消息]） */
+  static contentPlaceholderOf(type: string): string {
+    switch (type) {
+      case TdMessageContent.PHOTO:
+        return '[图片]';
+      case TdMessageContent.VIDEO:
+      case TdMessageContent.VIDEO_NOTE:
+        return '[视频]';
+      case TdMessageContent.DOCUMENT:
+        return '[文件]';
+      case TdMessageContent.VOICE_NOTE:
+        return '[语音]';
+      case TdMessageContent.ANIMATION:
+        return '[动画]';
+      case TdMessageContent.STICKER:
+        return '[贴纸]';
+      case TdMessageContent.AUDIO:
+        return '[音频]';
+      case TdMessageContent.LOCATION:
+        return '[位置]';
+      case TdMessageContent.CONTACT:
+        return '[联系人]';
+      case TdMessageContent.POLL:
+        return '[投票]';
+      case TdMessageContent.CALL:
+        return '[通话]';
+      default:
+        return '[消息]';
+    }
   }
 
   /** 字节数格式化（自写）：B / KB / MB / GB，保留 1 位小数（≥100 整数位足够时省小数） */

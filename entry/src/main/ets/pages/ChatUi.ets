@@ -4,7 +4,8 @@
  */
 import { ChatListStore } from '../core/ChatListStore';
 import { TimeFormat } from '../core/TimeFormat';
-import { TdField, TdMessageContent } from '../core/TdConstants';
+import { TdField } from '../core/TdConstants';
+import { MessageContent } from '../core/MessageContent';
 
 /** 会话行视图模型：由 TDLib chat 对象按需投影（仅可见行构建，千级列表零全量构建开销） */
 export class ChatRowModel {
@@ -85,60 +86,11 @@ export class ChatUi {
   }
 
   /**
-   * 最后消息预览提取：
-   * messageText → content.text.text（messageText.text 为 formattedText 对象）；
-   * 其余内容类型给中文占位文案；未知新类型回退 [消息]。
+   * 最后消息预览：委托 MessageContent.previewTextOf（M3-notifications 起与会话列表/通知共用一份提取，
+   * 文本压单行 + 媒体占位文案，见 core/MessageContent）。
    */
   private static previewText(lastMessage: Record<string, Object>): string {
-    const content: Record<string, Object> | null = ChatUi.asRecord(lastMessage[TdField.CONTENT]);
-    if (content === null) {
-      return '';
-    }
-    const typeObj: Object | undefined = content[TdField.TYPE];
-    const type: string = typeof typeObj === 'string' ? typeObj : '';
-    if (type === TdMessageContent.TEXT) {
-      const formatted: Record<string, Object> | null = ChatUi.asRecord(content[TdField.TEXT]);
-      if (formatted === null) {
-        return '';
-      }
-      const textObj: Object | undefined = formatted[TdField.TEXT];
-      if (typeof textObj !== 'string') {
-        return '';
-      }
-      // 多行文本压成单行预览
-      return textObj.replace(/\s+/g, ' ').trim();
-    }
-    return ChatUi.contentPlaceholder(type);
-  }
-
-  private static contentPlaceholder(type: string): string {
-    switch (type) {
-      case TdMessageContent.PHOTO:
-        return '[图片]';
-      case TdMessageContent.VIDEO:
-      case TdMessageContent.VIDEO_NOTE:
-        return '[视频]';
-      case TdMessageContent.DOCUMENT:
-        return '[文件]';
-      case TdMessageContent.VOICE_NOTE:
-        return '[语音]';
-      case TdMessageContent.ANIMATION:
-        return '[动画]';
-      case TdMessageContent.STICKER:
-        return '[贴纸]';
-      case TdMessageContent.AUDIO:
-        return '[音频]';
-      case TdMessageContent.LOCATION:
-        return '[位置]';
-      case TdMessageContent.CONTACT:
-        return '[联系人]';
-      case TdMessageContent.POLL:
-        return '[投票]';
-      case TdMessageContent.CALL:
-        return '[通话]';
-      default:
-        return '[消息]';
-    }
+    return MessageContent.previewTextOf(lastMessage);
   }
 
   private static asRecord(value: Object | undefined): Record<string, Object> | null {

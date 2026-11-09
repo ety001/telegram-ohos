@@ -45,6 +45,9 @@ export class TdUpdate {
   static readonly CHAT_READ_INBOX: string = 'updateChatReadInbox';
   static readonly CHAT_TITLE: string = 'updateChatTitle';
   static readonly CHAT_PHOTO: string = 'updateChatPhoto';
+  // 免打扰设置变更（M3-notifications 复审 HIGH-2；1.8.63 schema：updateChatNotificationSettings
+  // { notification_settings, chat_id? }——chat_id 缺省即全局默认设置变更，消费侧按会话粒度忽略）
+  static readonly CHAT_NOTIFICATION_SETTINGS: string = 'updateChatNotificationSettings';
   // getChats/searchChats 的结果对象（@type=chats，结果与 update 走同一分发入口）
   static readonly CHATS: string = 'chats';
   // getChat 的结果对象（@type=chat，chats 结果缺项时的补拉响应）
@@ -163,6 +166,10 @@ export class TdField {
   static readonly REVOKE: string = 'revoke';
   static readonly FROM_CACHE: string = 'from_cache';
   static readonly LAST_READ_OUTBOX_MESSAGE_ID: string = 'last_read_outbox_message_id';
+  // 通知免打扰判定（M3-notifications；chat.notification_settings.mute_for，1.8.63 schema：
+  // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
+  static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';
+  static readonly MUTE_FOR: string = 'mute_for';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）
   // 注意：messagePhoto.photo 复用上方 chat.photo 的 PHOTO 常量（同名同值）
   static readonly VIDEO: string = 'video';

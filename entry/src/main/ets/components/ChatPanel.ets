@@ -25,6 +25,7 @@ import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
+import { NotificationService } from '../core/NotificationService';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -77,6 +78,12 @@ export struct ChatPanel {
     MessageStore.getInstance().removeObserver(this.storeObserver);
     if (this.activatedChatId !== 0) {
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
+      // 通知触发规则接线：组件销毁后该会话不再视为「用户正在看」（新消息恢复通知）。
+      // 直接清 0（而非尝试恢复某个「上一会话」）的前提：Index 通知路由已做 sm 栈归一化
+      // （栈内至多一个 ChatPage 且 Index 常驻栈底），本组件销毁时栈下必无被覆盖的其他
+      // 会话面板——「返回底层 ChatPage 需恢复 activeChat」的场景已不存在（复审 LOW-10
+      // 随 MEDIUM-3 栈归一化闭合）。
+      NotificationService.getInstance().setActiveChat(0);
       this.activatedChatId = 0;
     }
   }
@@ -94,6 +101,9 @@ export struct ChatPanel {
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
     }
     this.activatedChatId = this.chatId;
+    // 通知触发规则接线（md/lg 选中变化 / sm ChatPage 推入弹出同一入口）：
+    // 更新「正被查看的会话」，切到即撤该会话未读通知（已读）
+    NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
     if (this.chatId !== 0) {
