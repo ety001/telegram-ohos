@@ -91,6 +91,22 @@ export class TdUpdateRouter {
   }
 
   /**
+   * 主动作废一个 @extra 等待：请求侧 send 抛错等场景须立即 reject 等待者并清 timer，
+   * 而非让 waiter 挂到超时才感知（调用方 catch 分支据此做状态救济）。
+   * 等待者不存在（已 resolve/已超时）返回 false，幂等。
+   */
+  rejectExtra(extra: string, reason: string): boolean {
+    const waiter: ExtraWaiter | undefined = this.extraWaiters.get(extra);
+    if (waiter === undefined) {
+      return false;
+    }
+    this.extraWaiters.delete(extra);
+    clearTimeout(waiter.timerId);
+    waiter.reject(reason);
+    return true;
+  }
+
+  /**
    * 唯一分发入口（TdClient.dispatch 调用）。
    * 路由顺序：@extra 等待匹配 → 类型路由 → fallback。
    */

@@ -29,6 +29,10 @@ export class TdReq {
   static readonly OPEN_CHAT: string = 'openChat';
   static readonly CLOSE_CHAT: string = 'closeChat';
   static readonly DELETE_MESSAGES: string = 'deleteMessages';
+  // 媒体下载（1.8.63 schema：downloadFile(file_id, priority, offset, limit, synchronous) 返回 file，
+  // 尚无 suffix 参数——后版 schema 才引入，勿混用）
+  static readonly DOWNLOAD_FILE: string = 'downloadFile';
+  static readonly CANCEL_DOWNLOAD_FILE: string = 'cancelDownloadFile';
 }
 
 export class TdUpdate {
@@ -54,6 +58,8 @@ export class TdUpdate {
   static readonly CHAT_READ_OUTBOX: string = 'updateChatReadOutbox';
   // getChatHistory 的结果对象（@type=messages，含完整 message 数组；与 update 走同一分发入口）
   static readonly MESSAGES: string = 'messages';
+  // 媒体下载进度/完成通知（updateFile.file：含 local.path / is_downloading_* / downloaded_size）
+  static readonly UPDATE_FILE: string = 'updateFile';
 }
 
 export class AuthStateType {
@@ -157,4 +163,35 @@ export class TdField {
   static readonly REVOKE: string = 'revoke';
   static readonly FROM_CACHE: string = 'from_cache';
   static readonly LAST_READ_OUTBOX_MESSAGE_ID: string = 'last_read_outbox_message_id';
+  // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）
+  // 注意：messagePhoto.photo 复用上方 chat.photo 的 PHOTO 常量（同名同值）
+  static readonly VIDEO: string = 'video';
+  static readonly VIDEO_NOTE: string = 'video_note';
+  static readonly DOCUMENT: string = 'document';
+  static readonly VOICE_NOTE: string = 'voice_note';
+  static readonly ANIMATION: string = 'animation';
+  static readonly STICKER: string = 'sticker';
+  static readonly CAPTION: string = 'caption';
+  static readonly SIZES: string = 'sizes';
+  static readonly MINITHUMBNAIL: string = 'minithumbnail';
+  static readonly THUMBNAIL: string = 'thumbnail';
+  static readonly DATA: string = 'data';
+  static readonly WIDTH: string = 'width';
+  static readonly HEIGHT: string = 'height';
+  static readonly DURATION: string = 'duration';
+  static readonly FILE_NAME: string = 'file_name';
+  static readonly MIME_TYPE: string = 'mime_type';
+  static readonly SUPPORTS_STREAMING: string = 'supports_streaming';
+  // file / localFile / downloadFile 请求字段
+  static readonly FILE: string = 'file';
+  static readonly LOCAL: string = 'local';
+  static readonly PATH: string = 'path';
+  static readonly SIZE: string = 'size';
+  static readonly EXPECTED_SIZE: string = 'expected_size';
+  static readonly IS_DOWNLOADING_ACTIVE: string = 'is_downloading_active';
+  static readonly IS_DOWNLOADING_COMPLETED: string = 'is_downloading_completed';
+  static readonly DOWNLOADED_SIZE: string = 'downloaded_size';
+  static readonly PRIORITY: string = 'priority';
+  static readonly OFFSET: string = 'offset';
+  static readonly SYNCHRONOUS: string = 'synchronous';
 }
