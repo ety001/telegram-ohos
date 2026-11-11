@@ -134,9 +134,11 @@ export class TdSendingState {
 export class TdInputMessage {
   static readonly INPUT_MESSAGE_TEXT: string = 'inputMessageText';
   static readonly FORMATTED_TEXT: string = 'formattedText';
-  // 附件发送（1.8.63 schema）
-  static readonly INPUT_MESSAGE_PHOTO: string = 'inputMessagePhoto';
-  static readonly INPUT_MESSAGE_DOCUMENT: string = 'inputMessageDocument';
+  // 文本发送简写
+  static readonly TEXT: string = 'inputMessageText';
+  // 附件发送（1.8.63 schema：sendMessage 的 input_message_content 用）
+  static readonly PHOTO: string = 'inputMessagePhoto';
+  static readonly DOCUMENT: string = 'inputMessageDocument';
 }
 
 /** MessageSource 子类型（viewMessages.source 用；1.8.63 为对象类型，非旧版 message_source 字符串） */

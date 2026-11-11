@@ -622,10 +622,19 @@ export class MessageStore {
         this.markPlaceholderFailed(chatId, localId, '发送超时');
         this.notifyChanged(chatId);
       });
+    // TDLib: 发送图片用 sendMessage + inputMessagePhoto（非独立 sendPhoto 方法）
+    const photoInput: Record<string, Object> = {
+      ['@type']: 'inputFileLocal',
+      'path': fileUri
+    };
+    const inputContent: Record<string, Object> = {
+      ['@type']: TdInputMessage.PHOTO,
+      'photo': photoInput
+    };
     const request: Record<string, Object> = {
-      ['@type']: TdReq.SEND_PHOTO,
+      ['@type']: TdReq.SEND_MESSAGE,
       'chat_id': chatId,
-      'photo': { ['@type']: 'inputFileLocal', 'path': fileUri } as Record<string, Object>
+      'input_message_content': inputContent
     };
     request[TdField.EXTRA] = extra;
     TdClient.getInstance().send(request);
@@ -689,14 +698,25 @@ export class MessageStore {
         this.markPlaceholderFailed(chatId, localId, '发送超时');
         this.notifyChanged(chatId);
       });
-    const request: Record<string, Object> = {
-      ['@type']: TdReq.SEND_DOCUMENT,
-      'chat_id': chatId,
-      'document': { ['@type']: 'inputFileLocal', 'path': fileUri } as Record<string, Object>,
-      'disable_notification': false
+    // TDLib: 发送文件用 sendMessage + inputMessageDocument（非独立 sendDocument 方法）
+    const docInput: Record<string, Object> = {
+      ['@type']: 'inputFileLocal',
+      'path': fileUri
     };
-    request[TdField.EXTRA] = extra;
-    TdClient.getInstance().send(request);
+    const docContent2: Record<string, Object> = {
+      ['@type']: TdInputMessage.DOCUMENT,
+      'document': docInput
+    };
+    if (fileName && fileName.length > 0) {
+      (docContent2 as Record<string, Object>)['file_name'] = fileName;
+    }
+    const request2: Record<string, Object> = {
+      ['@type']: TdReq.SEND_MESSAGE,
+      'chat_id': chatId,
+      'input_message_content': docContent2
+    };
+    request2[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request2);
   }
 
   /** 失败重试：删除失败占位（本地 + TDLib）后按原文重发 */
