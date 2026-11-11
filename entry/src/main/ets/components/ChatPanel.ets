@@ -31,6 +31,7 @@ import { NotificationService } from '../core/NotificationService';
 import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
+import { fileUri } from '@kit.CoreFileKit';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
 class OverlayKind {
@@ -364,7 +365,10 @@ export struct ChatPanel {
       // PhotoSelectResult.photoUris is string[]
       const uris: Array<string> = selectResult?.photoUris ?? [];
       if (uris.length > 0 && this.chatId !== 0) {
-        MessageStore.getInstance().sendPhoto(this.chatId, uris[0]);
+        // 转换 file:// URI 为绝对路径（TDLib inputFileLocal 需要真实路径）
+        const filePath: string = this.uriToPath(uris[0]);
+        hilog.info(0x0012, 'ChatPanel', 'selectPhoto: uri=%{private}s path=%{private}s', uris[0], filePath);
+        MessageStore.getInstance().sendPhoto(this.chatId, filePath);
       }
     } catch (err) {
       hilog.error(0x0012, 'ChatPanel', 'selectPhoto failed: %{public}s', JSON.stringify(err));
@@ -381,11 +385,39 @@ export struct ChatPanel {
       const uris: Array<string> = await documentPicker.select(documentSelectOptions);
       if (uris && uris.length > 0 && this.chatId !== 0) {
         const fileUri: string = uris[0];
-        let fileName: string = fileUri.split('/').pop() || '文件';
-        MessageStore.getInstance().sendDocument(this.chatId, fileUri, fileName);
+        const filePath: string = this.uriToPath(fileUri);
+        let fileName: string = filePath.split('/').pop() || '文件';
+        hilog.info(0x0012, 'ChatPanel', 'selectDocument: uri=%{private}s path=%{private}s', fileUri, filePath);
+        MessageStore.getInstance().sendDocument(this.chatId, filePath, fileName);
       }
     } catch (err) {
       hilog.error(0x0012, 'ChatPanel', 'selectDocument failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /**
+   * 将 HarmonyOS file:// URI 转换为 TDLib 可用的绝对路径。
+   * picker 返回的 URI 格式：file://media/Photo/... 或 file:///data/storage/...
+   * 使用 fileUri.FileUri(uri).path 解析真实文件系统路径
+   */
+  private uriToPath(uri: string): string {
+    if (!uri) {
+      return '';
+    }
+    try {
+      // 使用 HarmonyOS FileUri API 解析真实路径
+      const uriObj: fileUri.FileUri = new fileUri.FileUri(uri);
+      const realPath: string = uriObj.path;
+      hilog.info(0x0012, 'ChatPanel', 'uriToPath: %{private}s -> %{private}s', uri, realPath);
+      return realPath;
+    } catch (e) {
+      hilog.error(0x0012, 'ChatPanel', 'uriToPath failed: %{public}s', JSON.stringify(e));
+      // 降级处理：移除 file:// 前缀
+      let path: string = uri;
+      if (path.startsWith('file://')) {
+        path = path.substring(7);
+      }
+      return path;
     }
   }
 
