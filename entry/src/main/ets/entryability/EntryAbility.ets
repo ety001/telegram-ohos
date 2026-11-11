@@ -13,11 +13,29 @@ import { image } from '@kit.ImageKit';
 const TAG: string = 'EntryAbility';
 const LOG_DOMAIN: number = 0x0011;
 
+/** 窗口位置 */
+interface WindowPosition {
+  x: number;
+  y: number;
+}
+
+/** 窗口大小 */
+interface WindowSize {
+  width: number;
+  height: number;
+}
+
 export default class EntryAbility extends UIAbility {
   /** 主窗口 Stage（onPrepareToTerminate 最小化用） */
   private mainWindowStage: window.WindowStage | null = null;
   /** 是否正在最小化到托盘（非真正退出） */
   private isMinimizingToTray: boolean = false;
+  /** 窗口隐藏前的位置（用于恢复） */
+  private savedWindowPos: WindowPosition | null = null;
+  /** 窗口隐藏前的大小（用于恢复） */
+  private savedWindowSize: WindowSize | null = null;
+  /** 窗口是否已隐藏到托盘 */
+  private isWindowHidden: boolean = false;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(LOG_DOMAIN, TAG, 'onCreate, action: %{public}s', want.action ?? '');
@@ -111,8 +129,17 @@ export default class EntryAbility extends UIAbility {
     if (this.mainWindowStage !== null) {
       try {
         const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
-        mainWindow.showWindow();
-        hilog.info(LOG_DOMAIN, TAG, 'main window shown from tray');
+        if (this.isWindowHidden && this.savedWindowPos && this.savedWindowSize) {
+          // 恢复窗口到原来的位置和大小
+          mainWindow.moveWindowTo(this.savedWindowPos.x, this.savedWindowPos.y);
+          mainWindow.resize(this.savedWindowSize.width, this.savedWindowSize.height);
+          this.isWindowHidden = false;
+          hilog.info(LOG_DOMAIN, TAG, 'main window restored from tray');
+        } else {
+          // 正常显示（置顶）
+          mainWindow.showWindow();
+          hilog.info(LOG_DOMAIN, TAG, 'main window shown');
+        }
       } catch (err) {
         hilog.error(LOG_DOMAIN, TAG, 'showMainWindow failed: %{public}s', JSON.stringify(err));
       }
@@ -142,19 +169,28 @@ export default class EntryAbility extends UIAbility {
 
   /**
    * 拦截窗口关闭事件（PC 端点 X / Dock 栏右键关闭）。
-   * 返回 true 阻止关闭，最小化窗口到任务栏。
-   * 点击任务栏/托盘图标可恢复窗口。
+   * 返回 true 阻止关闭，隐藏窗口到托盘（完全隐藏，任务栏无图标）。
+   * 点击托盘图标可恢复窗口。
    */
   onPrepareToTerminate(): boolean {
-    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize window');
+    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will hide window to tray');
     this.isMinimizingToTray = true;
     if (this.mainWindowStage !== null) {
       try {
         const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
-        mainWindow.minimize();
-        hilog.info(LOG_DOMAIN, TAG, 'window minimized to taskbar');
+        // 保存当前窗口位置和大小（用于恢复）
+        const properties = mainWindow.getWindowProperties();
+        this.savedWindowPos = { x: properties.windowRect.left, y: properties.windowRect.top } as WindowPosition;
+        this.savedWindowSize = {
+          width: properties.windowRect.width,
+          height: properties.windowRect.height
+        } as WindowSize;
+        // 将窗口移出屏幕实现完全隐藏（不是 minimize，minimize 会保留任务栏图标）
+        mainWindow.moveWindowTo(-9999, -9999);
+        this.isWindowHidden = true;
+        hilog.info(LOG_DOMAIN, TAG, 'window hidden to tray (moved off-screen)');
       } catch (err) {
-        hilog.error(LOG_DOMAIN, TAG, 'minimize failed: %{public}s', JSON.stringify(err));
+        hilog.error(LOG_DOMAIN, TAG, 'hide window failed: %{public}s', JSON.stringify(err));
       }
     }
     return true;  // 返回 true 阻止关闭
