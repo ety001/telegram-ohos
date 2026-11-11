@@ -23,6 +23,18 @@
     {
       "name": "search_placeholder",
       "value": "搜索"
+    },
+    {
+      "name": "permission_terminate_reason",
+      "value": "关闭窗口时最小化到任务栏，保持后台接收消息"
+    },
+    {
+      "name": "StatusBarViewAbility_desc",
+      "value": "Telegram 系统托盘图标"
+    },
+    {
+      "name": "TrayIconService_desc",
+      "value": "Telegram 托盘图标后台服务"
     }
   ]
 }

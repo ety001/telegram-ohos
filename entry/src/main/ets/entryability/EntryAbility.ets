@@ -7,11 +7,18 @@ import { TdClient } from '../tdlib/TdClient';
 import { BreakpointTool } from '../core/BreakpointTool';
 import { NotificationService } from '../core/NotificationService';
 import { KeepAliveService } from '../core/KeepAliveService';
+import { statusBarManager } from '@kit.DeskTopExtensionKit';
+import { image } from '@kit.ImageKit';
 
 const TAG: string = 'EntryAbility';
 const LOG_DOMAIN: number = 0x0011;
 
 export default class EntryAbility extends UIAbility {
+  /** 主窗口 Stage（onPrepareToTerminate 最小化用） */
+  private mainWindowStage: window.WindowStage | null = null;
+  /** 是否正在最小化到托盘（非真正退出） */
+  private isMinimizingToTray: boolean = false;
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(LOG_DOMAIN, TAG, 'onCreate, action: %{public}s', want.action ?? '');
     // 配置存储初始化（凭证/代理），先于任何页面使用
@@ -30,24 +37,86 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
-    // 保活收尾：销毁即释放长时任务（撤常驻通知；进程被杀时系统亦会清理，此处为正常退出的整洁路径）
+    hilog.info(LOG_DOMAIN, TAG, 'onDestroy, isMinimizingToTray=%{public}s', String(this.isMinimizingToTray));
+    // 如果是最小化到托盘（非用户主动退出），不释放资源，保持后台运行
+    if (this.isMinimizingToTray) {
+      hilog.info(LOG_DOMAIN, TAG, 'minimize to tray: keeping alive in background');
+      this.isMinimizingToTray = false;
+      return; // 不执行下面的清理逻辑
+    }
+    // 真正退出：保活收尾 + TDLib 收尾
     KeepAliveService.getInstance().stopKeepAlive();
-    // TDLib 收尾：发送 close + 停接收线程（NAPI 复审遗留落地）
     TdClient.getInstance().dispose();
-    hilog.info(LOG_DOMAIN, TAG, 'onDestroy');
+    hilog.info(LOG_DOMAIN, TAG, 'onDestroy - app quit');
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     hilog.info(LOG_DOMAIN, TAG, 'onWindowStageCreate');
+    // 保存主窗口引用（关闭拦截最小化用）
+    this.mainWindowStage = windowStage;
+    // 保存到 AppStorage 供页面层最小化按钮使用
+    AppStorage.setOrCreate('windowStage', windowStage);
     // 断点初值先于首页 loadContent 就绪（Index aboutToAppear 即可读到真实断点）
     BreakpointTool.getInstance().attach(windowStage);
+    // 注意：不注册 windowStageClose 监听！
+    // 因为注册后会导致 onPrepareToTerminate 不再被调用（官方文档明确说明）
+    // 窗口关闭拦截完全依赖 onPrepareToTerminate 返回 false
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         hilog.error(LOG_DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
         return;
       }
       hilog.info(LOG_DOMAIN, TAG, 'loadContent succeeded');
+      // 注册系统托盘图标（状态栏扩展）
+      this.registerStatusBarIcon();
     });
+  }
+
+  /** 注册系统托盘（状态栏）图标 */
+  private async registerStatusBarIcon(): Promise<void> {
+    try {
+      const resourceMgr = this.context.resourceManager;
+      // 获取白色图标（深色背景用）
+      const whiteData: Uint8Array = resourceMgr.getRawFileContentSync('statusbar_white.png');
+      const whiteSource: image.ImageSource = image.createImageSource(whiteData.buffer as ArrayBuffer);
+      const whitePixelMap: image.PixelMap = await whiteSource.createPixelMap();
+      // 获取黑色图标（浅色背景用）
+      const blackData: Uint8Array = resourceMgr.getRawFileContentSync('statusbar_black.png');
+      const blackSource: image.ImageSource = image.createImageSource(blackData.buffer as ArrayBuffer);
+      const blackPixelMap: image.PixelMap = await blackSource.createPixelMap();
+      // 构建状态栏图标配置
+      const statusBarItem: statusBarManager.StatusBarItem = {
+        icons: {
+          white: whitePixelMap,
+          black: blackPixelMap
+        },
+        quickOperation: {
+          abilityName: 'EntryAbility',  // 点击恢复主窗口
+          title: 'Telegram',
+          height: 200,
+          moduleName: 'entry'
+        },
+        hoverTips: 'Telegram - 点击打开'
+      };
+      // 调用 API 添加到状态栏
+      statusBarManager.addToStatusBar(this.context, statusBarItem);
+      hilog.info(LOG_DOMAIN, TAG, 'status bar icon registered successfully');
+    } catch (err) {
+      hilog.error(LOG_DOMAIN, TAG, 'registerStatusBarIcon failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 显示主窗口（从托盘恢复） */
+  showMainWindow(): void {
+    if (this.mainWindowStage !== null) {
+      try {
+        const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
+        mainWindow.showWindow();
+        hilog.info(LOG_DOMAIN, TAG, 'main window shown from tray');
+      } catch (err) {
+        hilog.error(LOG_DOMAIN, TAG, 'showMainWindow failed: %{public}s', JSON.stringify(err));
+      }
+    }
   }
 
   onWindowStageDestroy(): void {
@@ -69,5 +138,32 @@ export default class EntryAbility extends UIAbility {
     NotificationService.getInstance().setForeground(false);
     // 进后台申请保活长时任务（TASK_KEEPING）保 TDLib 长连接；ready 登录态才申请（服务内判定）
     KeepAliveService.getInstance().startKeepAlive();
+  }
+
+  /**
+   * 拦截窗口关闭事件（PC 端点 X / Dock 栏右键关闭）。
+   * 返回 true 阻止关闭，改为最小化到任务栏 → KeepAliveService 保活 TDLib 继续收消息。
+   * 需要 ohos.permission.PREPARE_APP_TERMINATE 权限（module.json5 已声明）。
+   *
+   * 重要：返回 true = 阻止关闭！返回 false = 继续关闭！
+   */
+  onPrepareToTerminate(): boolean {
+    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize instead of close');
+    this.isMinimizingToTray = true; // 标记为最小化
+    // 最小化到任务栏而非真正关闭
+    if (this.mainWindowStage !== null) {
+      try {
+        const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
+        mainWindow.minimize();
+        hilog.info(LOG_DOMAIN, TAG, 'window minimized to taskbar - UIAbility preserved');
+      } catch (err) {
+        hilog.error(LOG_DOMAIN, TAG, 'minimize failed: %{public}s', JSON.stringify(err));
+      }
+    } else {
+      hilog.warn(LOG_DOMAIN, TAG, 'mainWindowStage is null');
+    }
+    // 返回 TRUE 阻止系统关闭应用！（之前错误地返回了 false）
+    hilog.info(LOG_DOMAIN, TAG, 'returning TRUE to BLOCK termination');
+    return true;
   }
 }

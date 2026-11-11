@@ -14,6 +14,8 @@
  */
 import { router } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { window } from '@kit.ArkUI';
 import { TdClient } from '../tdlib/TdClient';
 import { AuthService, AppAuthState, AuthStateObserver } from '../core/AuthService';
 import { AuthStateType, TdReq, TdUpdate, TdField } from '../core/TdConstants';
@@ -381,6 +383,15 @@ struct Index {
           Circle({ width: 4, height: 4 }).fill(ChatUi.TEXT_SECONDARY)
           Rect({ width: 14, height: 2 }).fill(ChatUi.TEXT_SECONDARY)
         }
+        // 最小化按钮
+        Text('─')
+          .fontSize(16)
+          .fontColor(ChatUi.TEXT_SECONDARY)
+          .height(32)
+          .textAlign(TextAlign.Center)
+          .onClick(() => {
+            this.minimizeWindow();
+          })
       }
       .margin({ bottom: 18 })
       .bindMenu(this.settingsMenu())
@@ -400,6 +411,16 @@ struct Index {
         .fontWeight(FontWeight.Bold)
         .fontColor(ChatUi.TEXT_PRIMARY)
       Blank()
+      // 最小化按钮
+      Text('─')
+        .fontSize(18)
+        .fontColor(ChatUi.TEXT_SECONDARY)
+        .width(36)
+        .height(36)
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          this.minimizeWindow();
+        })
       Text('···')
         .fontSize(18)
         .fontColor(ChatUi.TEXT_SECONDARY)
@@ -684,5 +705,19 @@ struct Index {
     .layoutWeight(1)
     .height('100%')
     .backgroundColor(ChatUi.CHAT_BG)
+  }
+
+  /** 最小化窗口到任务栏（而非关闭） */
+  private minimizeWindow(): void {
+    try {
+      const windowStage = AppStorage.get('windowStage') as window.WindowStage;
+      if (windowStage !== undefined && windowStage !== null) {
+        const mainWindow: window.Window = windowStage.getMainWindowSync();
+        mainWindow.minimize();
+        hilog.info(0x0011, 'Index', 'window minimized by user button');
+      }
+    } catch (err) {
+      hilog.error(0x0011, 'Index', 'minimizeWindow failed: %{public}s', JSON.stringify(err));
+    }
   }
 }
