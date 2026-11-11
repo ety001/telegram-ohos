@@ -142,28 +142,21 @@ export default class EntryAbility extends UIAbility {
 
   /**
    * 拦截窗口关闭事件（PC 端点 X / Dock 栏右键关闭）。
-   * 返回 true 阻止关闭，改为最小化到任务栏 → KeepAliveService 保活 TDLib 继续收消息。
-   * 需要 ohos.permission.PREPARE_APP_TERMINATE 权限（module.json5 已声明）。
-   *
-   * 重要：返回 true = 阻止关闭！返回 false = 继续关闭！
+   * 返回 true 阻止关闭，最小化窗口到任务栏。
+   * 点击任务栏/托盘图标可恢复窗口。
    */
   onPrepareToTerminate(): boolean {
-    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize instead of close');
-    this.isMinimizingToTray = true; // 标记为最小化
-    // 最小化到任务栏而非真正关闭
+    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize window');
+    this.isMinimizingToTray = true;
     if (this.mainWindowStage !== null) {
       try {
         const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
         mainWindow.minimize();
-        hilog.info(LOG_DOMAIN, TAG, 'window minimized to taskbar - UIAbility preserved');
+        hilog.info(LOG_DOMAIN, TAG, 'window minimized to taskbar');
       } catch (err) {
         hilog.error(LOG_DOMAIN, TAG, 'minimize failed: %{public}s', JSON.stringify(err));
       }
-    } else {
-      hilog.warn(LOG_DOMAIN, TAG, 'mainWindowStage is null');
     }
-    // 返回 TRUE 阻止系统关闭应用！（之前错误地返回了 false）
-    hilog.info(LOG_DOMAIN, TAG, 'returning TRUE to BLOCK termination');
-    return true;
+    return true;  // 返回 true 阻止关闭
   }
 }

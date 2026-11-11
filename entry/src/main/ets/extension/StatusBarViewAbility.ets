@@ -3,7 +3,7 @@
  *
  * 功能：
  *   - 在 HarmonyOS PC 系统托盘（状态栏右侧）显示应用图标
- *   - 点击图标恢复窗口到前台
+ *   - 点击图标恢复窗口到前台（如果窗口被销毁则重新创建）
  *   - 配合 KeepAliveService 实现后台保活 + 通知
  *
  * 系统能力：SystemCapability.PCService.StatusBarManager
@@ -11,7 +11,7 @@
  * 参考：@kit.DeskTopExtensionKit StatusBarViewExtensionAbility
  */
 import { StatusBarViewExtensionAbility } from '@kit.DeskTopExtensionKit';
-import { UIExtensionContentSession, Want } from '@kit.AbilityKit';
+import { UIExtensionContentSession, Want, common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 
@@ -45,8 +45,8 @@ export default class TelegramStatusBarAbility extends StatusBarViewExtensionAbil
   }
 
   onForeground(): void {
-    hilog.info(LOG_DOMAIN, TAG, 'onForeground - status bar icon clicked');
-    // 点击托盘图标时，恢复主窗口
+    hilog.info(LOG_DOMAIN, TAG, 'onForeground - status bar icon clicked!');
+    // 点击托盘图标时，恢复或重新创建主窗口
     this.restoreMainWindow();
   }
 
@@ -54,17 +54,26 @@ export default class TelegramStatusBarAbility extends StatusBarViewExtensionAbil
     hilog.info(LOG_DOMAIN, TAG, 'onBackground');
   }
 
-  /** 恢复主窗口到前台 */
+  /** 恢复主窗口到前台（如果窗口被销毁则重新创建） */
   private restoreMainWindow(): void {
     try {
-      // 通过窗口名查找主窗口
+      // 方法1：尝试查找并显示已存在的窗口
       const mainWindow: window.Window | undefined = window.findWindow('main');
       if (mainWindow) {
         mainWindow.showWindow();
-        hilog.info(LOG_DOMAIN, TAG, 'main window restored');
+        hilog.info(LOG_DOMAIN, TAG, 'main window restored (showWindow)');
         return;
       }
-      hilog.warn(LOG_DOMAIN, TAG, 'main window not found');
+      // 方法2：窗口已被销毁，重新启动 EntryAbility 创建新窗口
+      hilog.info(LOG_DOMAIN, TAG, 'main window not found - restarting EntryAbility');
+      const want: Want = {
+        bundleName: 'com.ety001.telegramohos',
+        abilityName: 'EntryAbility',
+        moduleName: 'entry'
+      };
+      this.context.startAbility(want)
+        .then(() => hilog.info(LOG_DOMAIN, TAG, 'EntryAbility restarted'))
+        .catch((err: Error) => hilog.error(LOG_DOMAIN, TAG, 'restart failed: %{public}s', JSON.stringify(err)));
     } catch (err) {
       hilog.error(LOG_DOMAIN, TAG, 'restoreMainWindow failed: %{public}s', JSON.stringify(err));
     }
