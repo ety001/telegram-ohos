@@ -91,6 +91,15 @@ export class AuthService {
     TdUpdateRouter.getInstance().registerFallback((update: Record<string, Object>): void => {
       this.dispatchActionReply(update);
     });
+    // 认证引导（bootstrap）：td_json_client.h 契约——首次请求前 TDLib 不发送任何 update，
+    // 必须先发一个请求触发 Td actor 启动，updateAuthorizationState(waitTdlibParameters) 才会送达。
+    // getAuthorizationState 的直接回复不带 @extra，经 fallback 被 dispatchActionReply 忽略，无副作用。
+    try {
+      TdClient.getInstance().send({ ['@type']: TdReq.GET_AUTHORIZATION_STATE });
+    } catch (err) {
+      // 引导失败 = td_send 链路故障，记录后交由 probeTdlib 错误态暴露（不打断页面构建）
+      hilog.error(LOG_DOMAIN, TAG, 'kickstart getAuthorizationState failed: %{private}s', JSON.stringify(err));
+    }
     hilog.info(LOG_DOMAIN, TAG, 'AuthService started');
   }
 

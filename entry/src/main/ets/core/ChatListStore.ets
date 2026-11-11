@@ -649,6 +649,11 @@ export class ChatListStore {
       if (typeof order === 'number') {
         return order;
       }
+      // FIX: TDLib 64-bit order may exceed JS Number.MAX_SAFE_INTEGER,
+      // JSON parser preserves it as string; parse for sort comparison
+      if (typeof order === 'string') {
+        return Number(order) || 0;
+      }
     }
     return 0;
   }

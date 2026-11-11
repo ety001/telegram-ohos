@@ -72,7 +72,11 @@ void CallJs(napi_env env, napi_value js_callback, void * /*context*/, void *data
   if (napi_create_string_utf8(env, update->c_str(), update->size(), &argv) == napi_ok) {
     napi_value undefined;
     if (napi_get_undefined(env, &undefined) == napi_ok) {
-      napi_call_function(env, js_callback, undefined, 1, &argv, nullptr);
+      // napi_call_function(env, recv, func, ...)：recv 是 this、func 才是被调函数。
+      // 历史缺陷：recv/func 传反（func=undefined → TypeError → napi_pending_exception，
+      // 被 ArkTS 运行时静默吞掉），导致所有 update 从未送达 JS 层。
+      // 真机 DIAG 诊断定位（st=5=napi_pending_exception → 修复后 st=0=napi_ok）。
+      napi_call_function(env, undefined, js_callback, 1, &argv, nullptr);
     }
   }
   napi_close_handle_scope(env, scope);
@@ -185,7 +189,8 @@ extern "C" napi_value tdnapi_send(napi_env env, napi_callback_info info) {
 }
 
 // JS: executeSync(clientId: number, request: string): string —— td_execute（同步）
-// 适用：登录前的配置类请求（getVersion/setOption 等），不依赖接收线程。
+// 适用：登录前的配置类请求（getOption(version) 等，须为 1.8.63 文档标注
+// "Can be called synchronously" 的请求），不依赖接收线程。
 // 注意：td_execute 是全局函数、与 client 无关——clientId 参数保留仅为 JS 侧签名兼容，实现忽略。
 extern "C" napi_value tdnapi_executeSync(napi_env env, napi_callback_info info) {
   size_t argc = 2;

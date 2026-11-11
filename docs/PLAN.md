@@ -133,7 +133,7 @@ todos:
 - 应用社区补丁 2 处；openssl/zlib 复用已移植版本。
 - NAPI 桥：四函数 + `napi_threadsafe_function` 后台接收线程 + 批量回调。
 - 代理支持立项：TDLib `addProxy`（SOCKS5/MTProto），设置页透出（国内网络刚需）。
-- **验收**：真机 `td_execute(getVersion)` 返回版本号；`td_send` 初始化数据库成功；代理连通 DC。
+- **验收**：真机 `td_execute(getOption(version))` 返回版本号（原稿误写 getVersion——该 API 系后版新增，1.8.63 不存在，实际返回 error 400；td_api.tl:14694 明确 getOption 对 version/commit_hash 可同步调用）；`td_send` 初始化数据库成功；代理连通 DC。
 
 ### M2 登录与会话骨架（约 1~1.5 周）
 - `setTdlibParameters`（三个 database 全开）→ 手机号 → 验证码 → 2FA 密码 → `authorizationStateReady`。

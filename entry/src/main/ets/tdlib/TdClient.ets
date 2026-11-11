@@ -64,7 +64,7 @@ export class TdClient {
   }
 
   /**
-   * 同步请求（td_execute）：仅限登录前的配置类纯内存请求（getVersion 等），
+   * 同步请求（td_execute）：仅限登录前的配置类纯内存请求（getOption(version) 等），
    * 勿用于可触发网络/IO 的请求（那类走 send + 更新流）。
    * 桥返回空串时抛带语义的异常（NAPI 复审遗留修复）。
    */

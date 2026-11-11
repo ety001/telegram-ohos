@@ -9,7 +9,7 @@ export const createClient: () => number;
 /** 异步发送请求（td_send）；回复经 startReceiving 的回调送达 */
 export const send: (clientId: number, request: string) => void;
 
-/** 同步执行请求（td_execute）；登录前的配置类请求（如 getVersion）用 */
+/** 同步执行请求（td_execute）；登录前的配置类请求（如 getOption(version)）用 */
 export const executeSync: (clientId: number, request: string) => string;
 
 /**

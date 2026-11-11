@@ -15,7 +15,12 @@ export class TdReq {
   static readonly ADD_PROXY: string = 'addProxy';
   static readonly TEST_PROXY: string = 'testProxy';
   static readonly CLOSE: string = 'close';
-  static readonly GET_VERSION: string = 'getVersion';
+  // 认证引导（1.8.63 td_json_client.h 契约：首次请求前 TDLib 不发送任何 update，
+  // 客户端启动后必须先发一个请求解锁 updateAuthorizationState 流）
+  static readonly GET_AUTHORIZATION_STATE: string = 'getAuthorizationState';
+  // 同步探测（1.8.63 td_api.tl:14694：getOption 对 "version"/"commit_hash" 可同步调用；
+  // getVersion 系后版 API，1.8.63 不存在，td_execute 会返回 error 400 Function not found）
+  static readonly GET_OPTION: string = 'getOption';
   // 会话列表（1.8.63 schema：getChats/loadChats 无 offset 参数，分页由 loadChats 增量加载）
   static readonly GET_CHATS: string = 'getChats';
   static readonly LOAD_CHATS: string = 'loadChats';
@@ -58,6 +63,8 @@ export class TdUpdate {
   static readonly CHAT_NOTIFICATION_SETTINGS: string = 'updateChatNotificationSettings';
   // getChats/searchChats 的结果对象（@type=chats，结果与 update 走同一分发入口）
   static readonly CHATS: string = 'chats';
+  // getOption(version) 的结果对象（@type=optionValueString，value 字段为版本号字符串）
+  static readonly OPTION_VALUE_STRING: string = 'optionValueString';
   // getChat 的结果对象（@type=chat，chats 结果缺项时的补拉响应）
   static readonly CHAT_RESULT: string = 'chat';
   // 消息收发（M3）
@@ -165,6 +172,8 @@ export class TdField {
   static readonly CLIENT_ID: string = '@client_id';
   static readonly MESSAGE: string = 'message';
   static readonly VERSION: string = 'version';
+  static readonly VALUE: string = 'value';
+  static readonly NAME: string = 'name';
   static readonly ERROR: string = 'error';
   // chat / update 通用字段
   static readonly ID: string = 'id';

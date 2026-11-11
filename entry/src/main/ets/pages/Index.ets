@@ -16,7 +16,7 @@ import { router } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { TdClient } from '../tdlib/TdClient';
 import { AuthService, AppAuthState, AuthStateObserver } from '../core/AuthService';
-import { AuthStateType } from '../core/TdConstants';
+import { AuthStateType, TdReq, TdUpdate, TdField } from '../core/TdConstants';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { MessageStore } from '../core/MessageStore';
 import { FileDownloadStore } from '../core/FileDownloadStore';
@@ -63,7 +63,7 @@ class AuthStateTextMap {
   }
 }
 
-// M1 连通验证：TDLib 版本探测（td_execute(getVersion)）
+// M1 连通验证：TDLib 版本探测（td_execute getOption(version)）
 const TD_STATUS_ERROR: string = 'TDLib 未连通（td_execute 不可用）';
 
 // 布局尺寸（单位：vp）
@@ -174,18 +174,28 @@ struct Index {
     }
   }
 
-  // M1 验收载体：td_execute getVersion（登录前配置类请求，纯内存瞬时返回）
+  // M1 验收载体：td_execute getOption(version)（登录前配置类请求，纯内存瞬时返回）。
+  // 1.8.63 td_api.tl:14694：getOption 仅 "version"/"commit_hash" 可同步调用；
+  // 原 getVersion 系后版 API（1.8.63 不存在），td_execute 返回 error 400 Function not found。
   private probeTdlib(): void {
     try {
-      const request: Record<string, Object> = { '@type': 'getVersion' };
+      const request: Record<string, Object> = { '@type': TdReq.GET_OPTION, 'name': 'version' };
       const response: Record<string, Object> = TdClient.getInstance().execute(request);
-      const rawVersion: Object | undefined = response['version'];
-      if (rawVersion === undefined) {
-        this.tdStatusText = TD_STATUS_ERROR;
-        return;
+      const typeObj: Object | undefined = response[TdField.TYPE];
+      const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+      if (type === TdUpdate.OPTION_VALUE_STRING) {
+        const rawVersion: Object | undefined = response[TdField.VALUE];
+        if (typeof rawVersion === 'string') {
+          this.tdStatusText = `TDLib ${rawVersion} · connected`;
+          this.tdConnected = true;
+          return;
+        }
       }
-      this.tdStatusText = `TDLib ${String(rawVersion)} · connected`;
-      this.tdConnected = true;
+      // 非 optionValueString（如 error）：透传 @type 与 message 便于定位
+      const msgObj: Object | undefined = response[TdField.MESSAGE];
+      const detail: string = typeof msgObj === 'string' ? msgObj as string : type;
+      this.tdStatusText = `${TD_STATUS_ERROR}: ${detail}`;
+      this.tdConnected = false;
     } catch (error) {
       // 诊断增强：透传真实错误（BusinessError.code / Error.message），定位 td_execute 不可用根因
       const err = error as BusinessError;
