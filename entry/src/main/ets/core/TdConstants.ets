@@ -28,6 +28,9 @@ export class TdReq {
   // 消息收发（1.8.63 schema：sendMessage 无 message_thread_id/reply_to_message_id 平铺字段，
   // 主题/回复分别是 topic_id:MessageTopic 与 reply_to:InputMessageReplyTo 对象，纯文本发送可整体缺省）
   static readonly SEND_MESSAGE: string = 'sendMessage';
+  // 附件发送（1.8.63 schema）
+  static readonly SEND_PHOTO: string = 'sendPhoto';
+  static readonly SEND_DOCUMENT: string = 'sendDocument';
   // 1.8.63 schema：getChatHistory(chat_id, from_message_id, offset, limit, only_local) 返回 messages
   static readonly GET_CHAT_HISTORY: string = 'getChatHistory';
   static readonly VIEW_MESSAGES: string = 'viewMessages';
@@ -131,6 +134,9 @@ export class TdSendingState {
 export class TdInputMessage {
   static readonly INPUT_MESSAGE_TEXT: string = 'inputMessageText';
   static readonly FORMATTED_TEXT: string = 'formattedText';
+  // 附件发送（1.8.63 schema）
+  static readonly INPUT_MESSAGE_PHOTO: string = 'inputMessagePhoto';
+  static readonly INPUT_MESSAGE_DOCUMENT: string = 'inputMessageDocument';
 }
 
 /** MessageSource 子类型（viewMessages.source 用；1.8.63 为对象类型，非旧版 message_source 字符串） */

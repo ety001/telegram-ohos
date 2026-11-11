@@ -28,6 +28,8 @@ import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBub
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
+import { picker } from '@kit.CoreFileKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -268,10 +270,17 @@ export struct ChatPanel {
     .padding({ top: 8, bottom: 4 })
   }
 
-  /** 输入区：TextInput + 发送按钮（回车/按钮双入口） */
+  /** 输入区：附件按钮 + TextInput + 发送按钮（回车/按钮双入口） */
   @Builder
   inputBar() {
     Row({ space: 8 }) {
+      // 附件按钮（📎）
+      Text('📎')
+        .fontSize(22)
+        .width(40)
+        .height(40)
+        .textAlign(TextAlign.Center)
+        .onClick(() => this.pickAttachment())
       TextInput({ text: this.inputText, placeholder: '输入消息' })
         .layoutWeight(1)
         .height(40)
@@ -335,6 +344,49 @@ export struct ChatPanel {
       return;
     }
     MessageStore.getInstance().retrySend(this.chatId, messageId);
+  }
+
+  /** 附件选择入口：弹出选择器（图片/文件） */
+  private async pickAttachment(): Promise<void> {
+    // TODO: 使用 ActionSheet 或自定义弹窗让用户选择图片/文件
+    // 当前先直接打开图片选择器
+    this.selectPhoto();
+  }
+
+  /** 选择图片并发送 */
+  private async selectPhoto(): Promise<void> {
+    try {
+      const photoPicker = new picker.PhotoViewPicker();
+      const photoSelectOptions = new picker.PhotoSelectOptions();
+      photoSelectOptions.MIMEType = picker.PhotoViewMIMETypes.IMAGE_TYPE;
+      photoSelectOptions.maxSelectNumber = 1;
+      const selectResult: picker.PhotoSelectResult = await photoPicker.select(photoSelectOptions);
+      // PhotoSelectResult.photoUris is string[]
+      const uris: Array<string> = selectResult?.photoUris ?? [];
+      if (uris.length > 0 && this.chatId !== 0) {
+        MessageStore.getInstance().sendPhoto(this.chatId, uris[0]);
+      }
+    } catch (err) {
+      hilog.error(0x0012, 'ChatPanel', 'selectPhoto failed: %{public}s', JSON.stringify(err));
+    }
+  }
+
+  /** 选择文件并发送 */
+  private async selectDocument(): Promise<void> {
+    try {
+      const documentPicker = new picker.DocumentViewPicker();
+      const documentSelectOptions = new picker.DocumentSelectOptions();
+      documentSelectOptions.maxSelectNumber = 1;
+      documentSelectOptions.defaultFilePathUri = 'internal://cache/';
+      const uris: Array<string> = await documentPicker.select(documentSelectOptions);
+      if (uris && uris.length > 0 && this.chatId !== 0) {
+        const fileUri: string = uris[0];
+        let fileName: string = fileUri.split('/').pop() || '文件';
+        MessageStore.getInstance().sendDocument(this.chatId, fileUri, fileName);
+      }
+    } catch (err) {
+      hilog.error(0x0012, 'ChatPanel', 'selectDocument failed: %{public}s', JSON.stringify(err));
+    }
   }
 
   /** 仓库通知/换会话后的视图重建：分组头合并 + 滚动定位（首屏到底/新消息跟底/上翻锚定） */

@@ -564,6 +564,141 @@ export class MessageStore {
     TdClient.getInstance().send(request);
   }
 
+  /** 发送图片：本地占位 → sendPhoto → 消息确认 */
+  sendPhoto(chatId: number, fileUri: string): void {
+    if (chatId === 0 || !this.started || fileUri.length === 0) {
+      return;
+    }
+    this.localIdSeq += 1;
+    const localId: number = LOCAL_ID_BASE - this.localIdSeq;
+    // 本地占位消息（显示为「图片发送中...」状态）
+    const photoContent: Record<string, Object> = {
+      ['@type']: 'messagePhoto',
+      'photo': { ['@type']: 'photo', 'is_local': true, 'path': fileUri } as Record<string, Object>
+    };
+    const sendingState: Record<string, Object> = { ['@type']: 'messageSendingStatePending' };
+    const placeholder: Record<string, Object> = {
+      'id': localId,
+      'chat_id': chatId,
+      'is_outgoing': true,
+      'date': Math.floor(Date.now() / 1000),
+      'content': photoContent,
+      'sending_state': sendingState
+    };
+    const cache: ChatMessageCache = this.ensureCache(chatId);
+    this.insertMessage(cache, placeholder);
+    hilog.info(LOG_DOMAIN, TAG, 'sendPhoto: chat=%{public}s file=%{private}s placeholder=%{public}d',
+      `${chatId}`, fileUri, localId);
+
+    this.actionSeq += 1;
+    const extra: string = `sendPhoto_${this.actionSeq}`;
+    const pending: PendingSend = { chatId: chatId, localId: localId, text: '[图片]' };
+    this.pendingSends.set(extra, pending);
+    TdUpdateRouter.getInstance().waitForExtra(extra, SEND_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        this.pendingSends.delete(extra);
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+        if (type === ErrorType.INVALID) {
+          const msgObj: Object | undefined = update[TdField.MESSAGE];
+          const msg: string = typeof msgObj === 'string' ? msgObj : '发送失败';
+          this.markPlaceholderFailed(chatId, localId, msg);
+          this.notifyChanged(chatId);
+          return;
+        }
+        const live: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (live === undefined) {
+          return;
+        }
+        this.removeById(live, localId);
+        const tempMessage: Record<string, Object> | null = this.asRecord(update);
+        if (tempMessage !== null) {
+          this.insertMessage(live, tempMessage);
+        }
+        this.notifyChanged(chatId);
+      })
+      .catch((reason: string): void => {
+        this.pendingSends.delete(extra);
+        this.markPlaceholderFailed(chatId, localId, '发送超时');
+        this.notifyChanged(chatId);
+      });
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEND_PHOTO,
+      'chat_id': chatId,
+      'photo': { ['@type']: 'inputFileLocal', 'path': fileUri } as Record<string, Object>
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+  }
+
+  /** 发送文件：本地占位 → sendDocument → 消息确认 */
+  sendDocument(chatId: number, fileUri: string, fileName?: string): void {
+    if (chatId === 0 || !this.started || fileUri.length === 0) {
+      return;
+    }
+    this.localIdSeq += 1;
+    const localId: number = LOCAL_ID_BASE - this.localIdSeq;
+    const displayName: string = fileName || fileUri.split('/').pop() || '文件';
+    const docContent: Record<string, Object> = {
+      ['@type']: 'messageDocument',
+      'document': { ['@type']: 'document', 'file_name': displayName, 'is_local': true } as Record<string, Object>
+    };
+    const sendingState2: Record<string, Object> = { ['@type']: 'messageSendingStatePending' };
+    const placeholder: Record<string, Object> = {
+      'id': localId,
+      'chat_id': chatId,
+      'is_outgoing': true,
+      'date': Math.floor(Date.now() / 1000),
+      'content': docContent,
+      'sending_state': sendingState2
+    };
+    const cache: ChatMessageCache = this.ensureCache(chatId);
+    this.insertMessage(cache, placeholder);
+    hilog.info(LOG_DOMAIN, TAG, 'sendDocument: chat=%{public}s file=%{private}s name=%{private}s placeholder=%{public}d',
+      `${chatId}`, fileUri, displayName, localId);
+
+    this.actionSeq += 1;
+    const extra: string = `sendDocument_${this.actionSeq}`;
+    const pending: PendingSend = { chatId: chatId, localId: localId, text: `[文件: ${displayName}]` };
+    this.pendingSends.set(extra, pending);
+    TdUpdateRouter.getInstance().waitForExtra(extra, SEND_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        this.pendingSends.delete(extra);
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+        if (type === ErrorType.INVALID) {
+          const msgObj: Object | undefined = update[TdField.MESSAGE];
+          const msg: string = typeof msgObj === 'string' ? msgObj : '发送失败';
+          this.markPlaceholderFailed(chatId, localId, msg);
+          this.notifyChanged(chatId);
+          return;
+        }
+        const live: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (live === undefined) {
+          return;
+        }
+        this.removeById(live, localId);
+        const tempMessage: Record<string, Object> | null = this.asRecord(update);
+        if (tempMessage !== null) {
+          this.insertMessage(live, tempMessage);
+        }
+        this.notifyChanged(chatId);
+      })
+      .catch((reason: string): void => {
+        this.pendingSends.delete(extra);
+        this.markPlaceholderFailed(chatId, localId, '发送超时');
+        this.notifyChanged(chatId);
+      });
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEND_DOCUMENT,
+      'chat_id': chatId,
+      'document': { ['@type']: 'inputFileLocal', 'path': fileUri } as Record<string, Object>,
+      'disable_notification': false
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+  }
+
   /** 失败重试：删除失败占位（本地 + TDLib）后按原文重发 */
   retrySend(chatId: number, messageId: number): void {
     const cache: ChatMessageCache | undefined = this.caches.get(chatId);
