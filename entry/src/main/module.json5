@@ -1,1 +1,54 @@
-{"module": {"name": "entry", "type": "entry", "description": "$string:module_desc", "mainElement": "EntryAbility", "deviceTypes": ["2in1", "tablet", "phone"], "deliveryWithInstall": true, "installationFree": false, "requestPermissions": [{"name": "ohos.permission.INTERNET"}, {"name": "ohos.permission.KEEP_BACKGROUND_RUNNING"}, {"name": "ohos.permission.PREPARE_APP_TERMINATE", "reason": "$string:permission_terminate_reason"}], "pages": "$profile:main_pages", "extensionAbilities": [{"name": "StatusBarViewAbility", "srcEntry": "./ets/extension/StatusBarViewAbility.ets", "type": "statusBarView", "description": "$string:StatusBarViewAbility_desc", "icon": "$media:app_icon"}], "abilities": [{"name": "EntryAbility", "srcEntry": "./ets/entryability/EntryAbility.ets", "description": "$string:EntryAbility_desc", "icon": "$media:app_icon", "label": "$string:EntryAbility_label", "startWindowIcon": "$media:app_icon", "startWindowBackground": "$color:start_window_background", "backgroundModes": ["taskKeeping"], "exported": true, "skills": [{"entities": ["entity.system.home"], "actions": ["ohos.want.action.home"]}]}]}}
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "srcEntry": "./ets/abilitystage/EntryAbilityStage.ets",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "2in1",
+      "tablet",
+      "phone"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
+      },
+      {
+        "name": "ohos.permission.PREPARE_APP_TERMINATE",
+        "reason": "$string:permission_terminate_reason"
+      }
+    ],
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "backgroundModes": [
+          "taskKeeping"
+        ],
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "ohos.want.action.home"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

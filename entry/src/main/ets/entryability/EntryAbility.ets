@@ -13,29 +13,9 @@ import { image } from '@kit.ImageKit';
 const TAG: string = 'EntryAbility';
 const LOG_DOMAIN: number = 0x0011;
 
-/** 窗口位置 */
-interface WindowPosition {
-  x: number;
-  y: number;
-}
-
-/** 窗口大小 */
-interface WindowSize {
-  width: number;
-  height: number;
-}
-
 export default class EntryAbility extends UIAbility {
   /** 主窗口 Stage（onPrepareToTerminate 最小化用） */
   private mainWindowStage: window.WindowStage | null = null;
-  /** 是否正在最小化到托盘（非真正退出） */
-  private isMinimizingToTray: boolean = false;
-  /** 窗口隐藏前的位置（用于恢复） */
-  private savedWindowPos: WindowPosition | null = null;
-  /** 窗口隐藏前的大小（用于恢复） */
-  private savedWindowSize: WindowSize | null = null;
-  /** 窗口是否已隐藏到托盘 */
-  private isWindowHidden: boolean = false;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(LOG_DOMAIN, TAG, 'onCreate, action: %{public}s', want.action ?? '');
@@ -55,17 +35,10 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
-    hilog.info(LOG_DOMAIN, TAG, 'onDestroy, isMinimizingToTray=%{public}s', String(this.isMinimizingToTray));
-    // 如果是最小化到托盘（非用户主动退出），不释放资源，保持后台运行
-    if (this.isMinimizingToTray) {
-      hilog.info(LOG_DOMAIN, TAG, 'minimize to tray: keeping alive in background');
-      this.isMinimizingToTray = false;
-      return; // 不执行下面的清理逻辑
-    }
-    // 真正退出：保活收尾 + TDLib 收尾
+    hilog.info(LOG_DOMAIN, TAG, 'onDestroy - app quit');
+    // 走到这里都是真实退出（关闭按钮已被 onPrepareToTerminate 拦截，不会触发 onDestroy）
     KeepAliveService.getInstance().stopKeepAlive();
     TdClient.getInstance().dispose();
-    hilog.info(LOG_DOMAIN, TAG, 'onDestroy - app quit');
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -78,7 +51,7 @@ export default class EntryAbility extends UIAbility {
     BreakpointTool.getInstance().attach(windowStage);
     // 注意：不注册 windowStageClose 监听！
     // 因为注册后会导致 onPrepareToTerminate 不再被调用（官方文档明确说明）
-    // 窗口关闭拦截完全依赖 onPrepareToTerminate 返回 false
+    // 窗口关闭拦截完全依赖 onPrepareToTerminate 返回 true
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code) {
         hilog.error(LOG_DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
@@ -116,30 +89,29 @@ export default class EntryAbility extends UIAbility {
         },
         hoverTips: 'Telegram - 点击打开'
       };
+      // 说明：不配置 statusBarGroupMenu。系统会在托盘右键菜单自动追加「退出」项
+      // （官方指南：该系统项不支持应用自定义），点击走 EntryAbilityStage.onPrepareTermination 真正退出。
       // 调用 API 添加到状态栏
       statusBarManager.addToStatusBar(this.context, statusBarItem);
+      // 注册托盘图标点击监听：quickOperation.abilityName 为空时，
+      // 点击事件必须通过 statusBarIconClick 事件处理（官方文档要求）
+      statusBarManager.on('statusBarIconClick', () => {
+        hilog.info(LOG_DOMAIN, TAG, 'status bar icon clicked, show main window');
+        this.showMainWindow();
+      });
       hilog.info(LOG_DOMAIN, TAG, 'status bar icon registered successfully');
     } catch (err) {
       hilog.error(LOG_DOMAIN, TAG, 'registerStatusBarIcon failed: %{public}s', JSON.stringify(err));
     }
   }
 
-  /** 显示主窗口（从托盘恢复） */
+  /** 显示主窗口（从托盘恢复）。最小化前的位置/大小由窗口管理器保留，无需手动还原 */
   showMainWindow(): void {
     if (this.mainWindowStage !== null) {
       try {
         const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
-        if (this.isWindowHidden && this.savedWindowPos && this.savedWindowSize) {
-          // 恢复窗口到原来的位置和大小
-          mainWindow.moveWindowTo(this.savedWindowPos.x, this.savedWindowPos.y);
-          mainWindow.resize(this.savedWindowSize.width, this.savedWindowSize.height);
-          this.isWindowHidden = false;
-          hilog.info(LOG_DOMAIN, TAG, 'main window restored from tray');
-        } else {
-          // 正常显示（置顶）
-          mainWindow.showWindow();
-          hilog.info(LOG_DOMAIN, TAG, 'main window shown');
-        }
+        mainWindow.showWindow();
+        hilog.info(LOG_DOMAIN, TAG, 'main window shown (restored from tray)');
       } catch (err) {
         hilog.error(LOG_DOMAIN, TAG, 'showMainWindow failed: %{public}s', JSON.stringify(err));
       }
@@ -168,32 +140,16 @@ export default class EntryAbility extends UIAbility {
   }
 
   /**
-   * 拦截窗口关闭事件（PC 端点 X / Dock 栏右键关闭）。
-   * 返回 true 阻止关闭，最小化窗口到任务栏。
-   * 点击任务栏/托盘图标可恢复窗口。
+   * 拦截窗口 X 按钮关闭（托盘/任务栏右键退出已分流至 EntryAbilityStage.onPrepareTermination）。
+   * 返回 true 阻止关闭，最小化窗口；进程与 TDLib 继续运行，托盘图标保留。
+   * 点击托盘图标触发 statusBarIconClick → showMainWindow() 恢复窗口。
    */
   onPrepareToTerminate(): boolean {
-    // 防重复调用：如果已经正在最小化，直接返回 true
-    if (this.isMinimizingToTray) {
-      hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: already minimizing, skip');
-      return true;
-    }
-    
-    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize window');
-    this.isMinimizingToTray = true;
+    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize window to tray');
     if (this.mainWindowStage !== null) {
       try {
         const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
-        // 保存当前窗口位置和大小（用于恢复）
-        const properties = mainWindow.getWindowProperties();
-        this.savedWindowPos = { x: properties.windowRect.left, y: properties.windowRect.top } as WindowPosition;
-        this.savedWindowSize = {
-          width: properties.windowRect.width,
-          height: properties.windowRect.height
-        } as WindowSize;
-        // 最小化窗口到任务栏（HarmonyOS 主窗口无法完全移出屏幕）
         mainWindow.minimize();
-        this.isWindowHidden = true;
         hilog.info(LOG_DOMAIN, TAG, 'window minimized to taskbar');
       } catch (err) {
         hilog.error(LOG_DOMAIN, TAG, 'minimize failed: %{public}s', JSON.stringify(err));
