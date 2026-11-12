@@ -217,7 +217,8 @@ export struct MessageBubble {
           this.textBubble()
         }
       }
-      .constraintSize({ maxWidth: '82%' })
+      // 外层不设 maxWidth（PR14 审计 P2-①）：Column 收敛到气泡宽度，引用条 width('100%')
+      // 与气泡对齐；避免外层百分比与气泡自身 78% 嵌套把文本气泡压到 ~61% 行宽
       .borderRadius(13)
       // 跳转高亮（M6-2/5）：短暂强调背景色（与气泡自身底色叠加由透明度保证可辨识）
       .backgroundColor(this.model.highlighted ? ChatUi.HIGHLIGHT_BG : Color.Transparent)

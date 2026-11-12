@@ -145,6 +145,18 @@ export struct ChatPanel {
     NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
+    // 回复/跳转状态归零（PR14 审计 P1-1）：回复目标/高亮/待跳转均属旧会话，残留会导致
+    // reply_to 指向异会话消息（发送必拒）与幽灵高亮
+    this.replyToMessageId = 0;
+    this.replyPreviewLabel = '';
+    this.pendingJumpId = 0;
+    if (this.highlightMessageId !== 0) {
+      this.highlightMessageId = 0;
+      if (this.highlightTimer >= 0) {
+        clearTimeout(this.highlightTimer);
+        this.highlightTimer = -1;
+      }
+    }
     // 恢复新会话本地草稿（M6-1；无草稿为空串）。守卫旧文本防 IME 回声（PR13 审计 P1-2）
     this.applyProgrammaticInput(DraftStore.getInstance().restore(this.chatId));
     if (this.chatId !== 0) {
