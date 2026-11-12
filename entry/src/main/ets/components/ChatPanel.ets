@@ -857,6 +857,7 @@ export struct ChatPanel {
     this.attachReplyInfo(bubble, message);
     // M6-3：已编辑标记（edit_date）与转发来源标签（forward_info.origin）
     bubble.edited = ChatPanel.readNumber(message, TdField.EDIT_DATE) > 0;
+    bubble.forwarded = MessageContent.isForwarded(message);
     bubble.forwardFrom = MessageContent.forwardFromNameOf(message);
     bubble.highlighted = this.highlightMessageId !== 0 && bubble.messageId === this.highlightMessageId;
     bubble.styleKey = `${RichText.fingerprint(bubble.segments)}_${RichText.fingerprint(bubble.captionSegments)}`;

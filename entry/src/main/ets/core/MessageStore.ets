@@ -194,6 +194,23 @@ export class MessageStore {
     }
   };
 
+  // 消息被编辑（M6-3）：edit_date 写回缓存消息——updateMessageContent 只带内容不带 edit_date，
+  // 「已编辑」标记依赖本更新即时出现（PR15 审计 P1-1）
+  private readonly onMessageEdited: TdRouteHandler = (update: Record<string, Object>): void => {
+    const chatId: number = this.readChatId(update);
+    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+    if (cache === undefined) {
+      return;
+    }
+    const messageId: number = this.readNumber(update, TdField.MESSAGE_ID);
+    const message: Record<string, Object> | undefined = this.findById(cache, messageId);
+    if (message === undefined) {
+      return;
+    }
+    message[TdField.EDIT_DATE] = this.readNumber(update, TdField.EDIT_DATE);
+    this.notifyChanged(chatId);
+  };
+
   /** 登录就绪后触发（幂等）：挂路由。由 Index 会话仓库生命周期同步调用 */
   start(): void {
     if (this.started) {
@@ -207,6 +224,7 @@ export class MessageStore {
     router.register(TdUpdate.MESSAGE_CONTENT, this.onMessageContent);
     router.register(TdUpdate.DELETE_MESSAGES, this.onDeleteMessages);
     router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
+    router.register(TdUpdate.MESSAGE_EDITED, this.onMessageEdited);
     hilog.info(LOG_DOMAIN, TAG, 'started');
   }
 

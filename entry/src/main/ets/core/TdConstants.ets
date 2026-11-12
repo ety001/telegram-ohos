@@ -88,6 +88,9 @@ export class TdUpdate {
   static readonly MESSAGE_SEND_FAILED: string = 'updateMessageSendFailed';
   static readonly MESSAGE_CONTENT: string = 'updateMessageContent';
   static readonly DELETE_MESSAGES: string = 'updateDeleteMessages';
+  // 消息被编辑（M6-3；1.8.63 schema：{chat_id, message_id, edit_date, reply_markup}——
+  // edit_date 经此更新下发，与 updateMessageContent 分离，漏注册会导致「已编辑」标记永不出现）
+  static readonly MESSAGE_EDITED: string = 'updateMessageEdited';
   static readonly CHAT_READ_OUTBOX: string = 'updateChatReadOutbox';
   // getChatHistory 的结果对象（@type=messages，含完整 message 数组；与 update 走同一分发入口）
   static readonly MESSAGES: string = 'messages';

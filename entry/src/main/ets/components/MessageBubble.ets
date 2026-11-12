@@ -107,8 +107,10 @@ export class MessageBubbleModel {
   // ---------------- 编辑与转发（M6-3） ----------------
   /** 已编辑标记（message.edit_date > 0；时间旁「已编辑」小字） */
   edited: boolean = false;
-  /** 转发来源名（message.forward_info.origin；空串 = 非转发消息，不渲染标签） */
+  /** 转发来源名（message.forward_info.origin；名称不可解析为空串，标签仍显示） */
   forwardFrom: string = '';
+  /** 是否转发消息（forward_info 存在；标签渲染门控，与名称可解析性解耦——PR15 审计 P1-2） */
+  forwarded: boolean = false;
 
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
@@ -219,9 +221,9 @@ export struct MessageBubble {
           .layoutWeight(1)
       }
       Column() {
-        // 转发来源标签（M6-3）：forward_info 存在时置顶「转发的消息」
-        if (this.model.forwardFrom.length > 0) {
-          Text(`转发的消息${this.model.forwardFrom.length > 0 ? `：${this.model.forwardFrom}` : ''}`)
+        // 转发来源标签（M6-3）：forward_info 存在即显示（名称不可解析时仅「转发的消息」）
+        if (this.model.forwarded) {
+          Text(this.model.forwardFrom.length > 0 ? `转发的消息：${this.model.forwardFrom}` : '转发的消息')
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
