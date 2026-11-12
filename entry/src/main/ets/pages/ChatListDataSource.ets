@@ -12,12 +12,15 @@
  */
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { DraftStore, DraftObserver } from '../core/DraftStore';
+import { UserStore, UserStoreObserver } from '../core/UserStore';
 import { ChatRowModel, ChatUi } from './ChatUi';
 
 export class ChatListDataSource implements IDataSource {
   private listeners: Array<DataChangeListener> = [];
   private visibleIds: Array<number> = [];
   private keyword: string = '';
+  /** 服务端搜索命中（M6-4）：query 清空即清空；rebuild 时并入未加载命中项 */
+  private serverIds: Array<number> = [];
   private readonly storeObserver: ChatListObserver = (): void => {
     this.rebuild();
     this.notifyReload();
@@ -27,10 +30,16 @@ export class ChatListDataSource implements IDataSource {
     this.rebuild();
     this.notifyReload();
   };
+  // 用户对象/在线状态变化（M6-4）：在线绿点刷新
+  private readonly userObserver: UserStoreObserver = (): void => {
+    this.rebuild();
+    this.notifyReload();
+  };
 
   constructor() {
     ChatListStore.getInstance().addObserver(this.storeObserver);
     DraftStore.getInstance().addObserver(this.draftObserver);
+    UserStore.getInstance().addObserver(this.userObserver);
     this.rebuild();
   }
 
@@ -38,6 +47,7 @@ export class ChatListDataSource implements IDataSource {
   dispose(): void {
     ChatListStore.getInstance().removeObserver(this.storeObserver);
     DraftStore.getInstance().removeObserver(this.draftObserver);
+    UserStore.getInstance().removeObserver(this.userObserver);
   }
 
   setKeyword(keyword: string): void {
@@ -46,6 +56,19 @@ export class ChatListDataSource implements IDataSource {
       return;
     }
     this.keyword = trimmed;
+    if (trimmed.length === 0) {
+      this.serverIds = [];
+    }
+    this.rebuild();
+    this.notifyReload();
+  }
+
+  /** 服务端搜索结果合入（M6-4；Index 防抖后调用。仅当 query 仍一致才应用——竞态防护） */
+  setServerResult(keyword: string, ids: Array<number>): void {
+    if (keyword.trim().toLowerCase() !== this.keyword) {
+      return;
+    }
+    this.serverIds = ids;
     this.rebuild();
     this.notifyReload();
   }
@@ -83,7 +106,11 @@ export class ChatListDataSource implements IDataSource {
     }
   }
 
-  /** 关键字过滤（标题 contains）作用于仓库有序列表的快照副本 */
+  /**
+   * 关键字过滤（标题 contains）作用于仓库有序列表的快照副本；
+   * M6-4：query 非空时追加服务端命中且未在本地列表的会话（置尾，点击可进入；
+   * 会话对象经 ChatListStore.searchChatsServer 内的 getChat 补拉，到达后 storeObserver 刷新）。
+   */
   private rebuild(): void {
     const store: ChatListStore = ChatListStore.getInstance();
     const ids: Array<number> = [];
@@ -95,6 +122,14 @@ export class ChatListDataSource implements IDataSource {
       const title: string = store.getTitle(chatId).toLowerCase();
       if (title.indexOf(this.keyword) >= 0) {
         ids.push(chatId);
+      }
+    }
+    if (this.keyword.length > 0) {
+      for (const chatId of this.serverIds) {
+        // PR16 审计 P1：getChat 补拉空窗期未入库的命中项不进列表（空行+重复 key"0"）
+        if (!ids.includes(chatId) && store.getChat(chatId) !== undefined) {
+          ids.push(chatId);
+        }
       }
     }
     this.visibleIds = ids;

@@ -22,6 +22,13 @@ export class ChatRowModel {
   draftLocal: string = '';
   /** 云端草稿文本（M6-1，chat.draft_message；本地为空时显示灰「草稿」前缀） */
   draftCloud: string = '';
+  // ---------------- 头像与在线（M6-4） ----------------
+  /** 头像小图 file id（0 = 无头像） */
+  avatarFileId: number = 0;
+  /** 头像 minithumbnail 裸 base64 */
+  avatarMini: string = '';
+  /** 私聊在线（绿点） */
+  online: boolean = false;
 }
 
 export class ChatUi {
@@ -99,6 +106,10 @@ export class ChatUi {
     if (row.draftLocal.length === 0) {
       row.draftCloud = ChatUi.cloudDraftText(chat);
     }
+    // 头像与在线（M6-4）
+    row.avatarFileId = ChatListStore.getInstance().getAvatarFileId(row.chatId);
+    row.avatarMini = ChatListStore.getInstance().getAvatarMini(row.chatId);
+    row.online = ChatListStore.getInstance().isOnline(row.chatId);
     return row;
   }
 

@@ -28,6 +28,7 @@ import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/Breakpoi
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
 import { ChatPanel } from '../components/ChatPanel';
+import { ChatAvatar } from '../components/ChatAvatar';
 
 /** 认证状态 → 中文提示（M2 复审建议：技术串不直出用户 UI） */
 class AuthStateTextMap {
@@ -93,7 +94,9 @@ struct Index {
   @State authStateText: string = '';
   @State loggedIn: boolean = false;
   @State breakpoint: string = Breakpoint.SM;
-  @State searchText: string = '';
+   @State searchText: string = '';
+  /** 服务端搜索防抖句柄（M6-4） */
+  private serverSearchTimer: number = -1;
   @State visibleCount: number = 0;
   @State selectedChatId: number = 0;
   @State selectedChatTitle: string = '';
@@ -142,6 +145,11 @@ struct Index {
     ChatListStore.getInstance().removeObserver(this.listObserver);
     NotificationService.getInstance().removeChatRouteObserver(this.notificationChatObserver);
     this.dataSource.dispose();
+    // PR16 审计 P2：销毁清防抖 timer（悬挂回调不再触发）
+    if (this.serverSearchTimer >= 0) {
+      clearTimeout(this.serverSearchTimer);
+      this.serverSearchTimer = -1;
+    }
   }
 
   /** 会话仓库生命周期：ready 拉首屏；离开 ready（登出/重登）重置，authState 流转自动回登录页 */
@@ -176,6 +184,30 @@ struct Index {
         this.selectedChatTitle = title;
       }
     }
+  }
+
+  /**
+   * 服务端搜索防抖（M6-4）：300ms 静默后 searchChats；结果与当前 query 一致才合入
+   * （竞态防护在 DataSource.setServerResult）。搜索命中未加载会话经 getChat 补拉后
+   * storeObserver 触发刷新。
+   */
+  private scheduleServerSearch(value: string): void {
+    if (this.serverSearchTimer >= 0) {
+      clearTimeout(this.serverSearchTimer);
+    }
+    const query: string = value;
+    this.serverSearchTimer = setTimeout((): void => {
+      this.serverSearchTimer = -1;
+      const keyword: string = query.trim();
+      if (keyword.length === 0) {
+        return;
+      }
+      ChatListStore.getInstance().searchChatsServer(keyword)
+        .then((ids: Array<number>): void => {
+          this.dataSource.setServerResult(keyword, ids);
+          this.refreshVisibleCount();
+        });
+    }, 300);
   }
 
   // M1 验收载体：td_execute getOption(version)（登录前配置类请求，纯内存瞬时返回）。
@@ -452,6 +484,7 @@ struct Index {
           this.searchText = value;
           this.dataSource.setKeyword(value);
           this.refreshVisibleCount();
+          this.scheduleServerSearch(value);
         })
 
       if (this.visibleCount === 0) {
@@ -509,20 +542,18 @@ struct Index {
     .justifyContent(FlexAlign.Center)
   }
 
-  // 会话行：头像占位（首字母圆环）+ 标题 + 预览 + 相对时间 + 未读角标 + 置顶/静音标记
+  // 会话行：头像（三级渐进 + 在线绿点）+ 标题 + 预览 + 相对时间 + 未读角标 + 置顶/静音标记
   @Builder
   chatRow(item: ChatRowModel) {
     Row({ space: 12 }) {
-      Stack() {
-        Circle({ width: AVATAR_SIZE, height: AVATAR_SIZE })
-          .fill(ChatUi.avatarColor(item.chatId))
-        Text(ChatUi.avatarLetter(item.title))
-          .fontSize(19)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-      }
-      .width(AVATAR_SIZE)
-      .height(AVATAR_SIZE)
+      ChatAvatar({
+        chatId: item.chatId,
+        title: item.title,
+        avatarFileId: item.avatarFileId,
+        avatarMini: item.avatarMini,
+        online: item.online,
+        avatarSize: AVATAR_SIZE
+      })
 
       Column({ space: 4 }) {
         Row() {
