@@ -21,7 +21,8 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TdClient } from '../tdlib/TdClient';
 import { TdUpdateRouter, TdRouteHandler } from './TdUpdateRouter';
-import { TdReq, TdUpdate, TdField, TdChatList, ErrorType } from './TdConstants';
+import { TdReq, TdUpdate, TdField, TdChatList, TdType, ErrorType } from './TdConstants';
+import { UserStore } from './UserStore';
 
 const TAG: string = 'ChatListStore';
 const LOG_DOMAIN: number = 0x0012;
@@ -119,6 +120,117 @@ export class ChatListStore {
     this.notifyChanged();
   };
 
+  // ---------------- 头像与在线状态（M6-4） ----------------
+
+  /** 私聊 user_id（chat.type=chatTypePrivate；非私聊返回 0） */
+  privateUserIdOf(chatId: number): number {
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return 0;
+    }
+    const type: Record<string, Object> | null = this.asRecord(chat['type']);
+    if (type === null) {
+      return 0;
+    }
+    const typeObj: Object | undefined = type[TdField.TYPE];
+    if (typeObj !== TdType.CHAT_TYPE_PRIVATE) {
+      return 0;
+    }
+    return this.readNumber(type, TdField.USER_ID);
+  }
+
+  /** 私聊在线判定（在线状态由 UserStore 维护） */
+  isOnline(chatId: number): boolean {
+    const userId: number = this.privateUserIdOf(chatId);
+    return userId !== 0 && UserStore.getInstance().isOnline(userId);
+  }
+
+  /** 头像小图 file id（chatPhotoInfo.small.id；无头像返回 0） */
+  getAvatarFileId(chatId: number): number {
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return 0;
+    }
+    const photo: Record<string, Object> | null = this.asRecord(chat[TdField.PHOTO]);
+    if (photo === null) {
+      return 0;
+    }
+    const small: Record<string, Object> | null = this.asRecord(photo[TdField.SMALL]);
+    if (small === null) {
+      return 0;
+    }
+    return this.readNumber(small, TdField.ID);
+  }
+
+  /** 头像 minithumbnail 裸 base64（无返回空串；未下载完成时的先行灰度显示） */
+  getAvatarMini(chatId: number): string {
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return '';
+    }
+    const photo: Record<string, Object> | null = this.asRecord(chat[TdField.PHOTO]);
+    if (photo === null) {
+      return '';
+    }
+    const mini: Record<string, Object> | null = this.asRecord(photo[TdField.MINITHUMBNAIL]);
+    if (mini === null) {
+      return '';
+    }
+    const data: Object | undefined = mini[TdField.DATA];
+    return typeof data === 'string' ? data : '';
+  }
+
+  // ---------------- 服务端搜索（M6-4） ----------------
+
+  /**
+   * searchChats（离线搜全部已知会话，含未加载进 UI 的）：结果 chats.chat_ids 中
+   * 未入库的会话显式 getChat 补拉（searchChats 响应同样只含 id 列表）。
+   * 返回 Promise<chatIds>；error/超时 resolve 空数组（搜索失败不阻塞本地过滤）。
+   */
+  searchChatsServer(query: string): Promise<Array<number>> {
+    const trimmed: string = query.trim();
+    if (trimmed.length === 0 || !this.started) {
+      return Promise.resolve(new Array<number>());
+    }
+    this.actionSeq += 1;
+    const extra: string = `searchChats_${this.actionSeq}`;
+    const promise: Promise<Array<number>> = new Promise<Array<number>>(
+      (resolve: (ids: Array<number>) => void): void => {
+        TdUpdateRouter.getInstance().waitForExtra(extra, GET_CHATS_TIMEOUT_MS)
+          .then((update: Record<string, Object>): void => {
+            const typeObj: Object | undefined = update[TdField.TYPE];
+            const type: string = typeof typeObj === 'string' ? typeObj : '';
+            if (type === ErrorType.INVALID) {
+              resolve(new Array<number>());
+              return;
+            }
+            const idsObj: Object | undefined = update[TdField.CHAT_IDS];
+            const ids: Array<number> = Array.isArray(idsObj) ? idsObj as Array<number> : [];
+            // 未入库会话补拉（updateNewChat 契约不覆盖 searchChats 结果，显式 getChat）
+            for (const chatId of ids) {
+              if (!this.chatById.has(chatId) && typeof chatId === 'number') {
+                TdClient.getInstance().send({
+                  ['@type']: TdReq.GET_CHAT,
+                  'chat_id': chatId
+                });
+              }
+            }
+            resolve(ids);
+          })
+          .catch((reason: string): void => {
+            resolve(new Array<number>());
+          });
+      });
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEARCH_CHATS,
+      'query': trimmed,
+      'limit': 30
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    return promise;
+  }
+
   /**
    * 登录就绪后触发（幂等）：挂路由 + 拉首屏。
    * 极端时序（ready 与 start 之间恰好新产生会话导致 updateNewChat 先于注册到达）下
@@ -143,6 +255,14 @@ export class ChatListStore {
     router.register(TdUpdate.CHAT_DRAFT_MESSAGE, this.onChatDraftMessage);
     hilog.info(LOG_DOMAIN, TAG, 'start: request first page, limit=%{public}d', PAGE_SIZE);
     this.requestFirstPage();
+    // M6-4：用户对象/在线状态路由随会话列表启停（已入库私聊补拉一次）
+    UserStore.getInstance().start();
+    for (const chatId of this.orderedIds) {
+      const userId: number = this.privateUserIdOf(chatId);
+      if (userId !== 0) {
+        UserStore.getInstance().ensureUser(userId);
+      }
+    }
   }
 
   /** 登出/会话结束（authState 离开 ready）后重置，下次登录重新拉取；已清空时为无副作用空操作 */
@@ -156,6 +276,7 @@ export class ChatListStore {
     this.firstPageLoaded = false;
     this.hasMore = true;
     this.loadingMore = false;
+    UserStore.getInstance().reset();
     hilog.info(LOG_DOMAIN, TAG, 'reset for next login');
     this.notifyChanged();
   }
@@ -396,6 +517,11 @@ export class ChatListStore {
     this.chatById.set(chatId, chat);
     this.applyPositionsField(chat);
     this.insertOrdered(chatId);
+    // M6-4：私聊会话入库即确保用户对象在途（在线状态/精确发送者名依赖）
+    const userId: number = this.privateUserIdOf(chatId);
+    if (userId !== 0) {
+      UserStore.getInstance().ensureUser(userId);
+    }
     this.notifyChanged();
   }
 

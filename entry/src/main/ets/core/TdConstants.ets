@@ -60,6 +60,11 @@ export class TdReq {
   // 1.8.63 schema：forwardMessages(chat_id, topic_id:MessageTopic 可空, from_chat_id, message_ids,
   // options:messageSendOptions 可空, send_copy:Bool, remove_caption:Bool) = Messages
   static readonly FORWARD_MESSAGES: string = 'forwardMessages';
+  // 会话搜索与用户（M6-4）
+  // 1.8.63 schema：searchChats(query:string, limit:int32) = Chats——离线搜全部已知会话
+  static readonly SEARCH_CHATS: string = 'searchChats';
+  // 1.8.63 schema：getUser(user_id:int53) = User
+  static readonly GET_USER: string = 'getUser';
 }
 
 export class TdUpdate {
@@ -97,6 +102,9 @@ export class TdUpdate {
   // 云端草稿变更（M6-1；1.8.63 schema：{ chat_id, draft_message:draftMessage, positions }——
   // 客户端无写草稿 API（saveDraft 已移除），仅其他端同步来的草稿经此更新；本地草稿走 DraftStore）
   static readonly CHAT_DRAFT_MESSAGE: string = 'updateChatDraftMessage';
+  // 用户在线状态（M6-4；updateUserStatus{user_id, status:UserStatus}；user 结果对象 @type=user）
+  static readonly USER_STATUS: string = 'updateUserStatus';
+  static readonly USER: string = 'user';
   // 媒体下载进度/完成通知（updateFile.file：含 local.path / is_downloading_* / downloaded_size）
   static readonly UPDATE_FILE: string = 'updateFile';
 }
@@ -179,6 +187,10 @@ export class TdType {
   static readonly MESSAGE_ORIGIN_HIDDEN_USER: string = 'messageOriginHiddenUser';
   static readonly MESSAGE_ORIGIN_CHANNEL: string = 'messageOriginChannel';
   static readonly MESSAGE_ORIGIN_CHAT: string = 'messageOriginChat';
+  // 会话类型与用户状态（M6-4；chat.type / updateUserStatus.status 判别）
+  static readonly CHAT_TYPE_PRIVATE: string = 'chatTypePrivate';
+  static readonly USER_STATUS_ONLINE: string = 'userStatusOnline';
+  static readonly USER_STATUS_OFFLINE: string = 'userStatusOffline';
 }
 
 /**
@@ -254,6 +266,13 @@ export class TdField {
   static readonly FORWARD_INFO: string = 'forward_info';
   // editMessageCaption 入参（M6-3；show_caption_above_media 从原 content 透传）
   static readonly SHOW_CAPTION_ABOVE_MEDIA: string = 'show_caption_above_media';
+  // 头像与用户（M6-4；chatPhotoInfo.small / user 对象字段；minithumbnail.data 复用既有 DATA 常量）
+  static readonly SMALL: string = 'small';
+  static readonly STATUS: string = 'status';
+  static readonly USER_ID: string = 'user_id';
+  static readonly FIRST_NAME: string = 'first_name';
+  static readonly LAST_NAME: string = 'last_name';
+  static readonly EXPIRES: string = 'expires';
   static readonly NEW_CONTENT: string = 'new_content';
   static readonly OLD_MESSAGE_ID: string = 'old_message_id';
   static readonly SENDING_STATE: string = 'sending_state';
