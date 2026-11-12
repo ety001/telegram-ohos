@@ -19,11 +19,14 @@
  */
 import { common } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { util } from '@kit.ArkTS';
 import { ChatUi } from '../pages/ChatUi';
 import { MediaKind } from '../core/MessageContent';
 import { RichSegment } from '../core/RichText';
 import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { MediaSaver, SaveResult } from '../core/MediaSaver';
+import { AudioPlayerController, AudioSnapshot, AudioState } from '../core/AudioPlayerController';
+import { MessageStore } from '../core/MessageStore';
 
 /** 媒体气泡展示尺寸（vp） */
 const MEDIA_WIDTH: number = 240;
@@ -92,6 +95,20 @@ export class MessageBubbleModel {
   caption: string = '';
   /** voice/animation/sticker/audio/未知类型占位文案 */
   placeholder: string = '';
+
+  // ---------------- 语音/音频（M6-6） ----------------
+  /** 所属会话（openMessageContent 上报用；buildBubble 填充） */
+  chatId: number = 0;
+  /** 语音：波形 base64（空 = 无波形降级） */
+  voiceWaveform: string = '';
+  /** 语音：未听蓝点 */
+  voiceUnheard: boolean = false;
+  /** 语音/音频时长文本（m:ss） */
+  audioDurationText: string = '';
+  /** 音频：标题（title - performer） */
+  audioTitle: string = '';
+  /** 语音/音频文件 id（下载+播放目标） */
+  audioFileId: number = 0;
 
   // ---------------- 回复引用（M6-2） ----------------
   /** 被回复消息 id（0 = 无引用） */
@@ -172,6 +189,14 @@ export struct MessageBubble {
   @State videoDownloading: boolean = false;
   @State docState: string = DocActionState.IDLE;
   @State docProgress: number = -1;
+  // 语音/音频播放态（M6-6；AudioPlayerController 单例快照按 key 匹配刷新）
+  @State voicePlaying: boolean = false;
+  @State voicePositionMs: number = 0;
+  @State voiceDurationMs: number = 0;
+  @State voiceSpeed: number = 1;
+  @State voiceFileReady: boolean = false;
+  /** 本次展示周期内已上报过已听（openMessageContent 幂等去重） */
+  private listenReported: boolean = false;
   /**
    * 用户已点击（下载完成即自动接续动作：视频播放 / 文件保存）。
    * 已知限制（M3-media 复审固化，不修）：组件私有标志在气泡滚出复用/重建后丢失，
@@ -190,16 +215,38 @@ export struct MessageBubble {
       this.onVideoFileChanged();
     } else if (fileId === this.model.docFileId && fileId !== 0) {
       this.onDocFileChanged();
+    } else if (fileId === this.model.audioFileId && fileId !== 0) {
+      this.onAudioFileChanged();
+    }
+  };
+
+  private readonly audioObserver: (snapshot: AudioSnapshot) => void = (snapshot: AudioSnapshot): void => {
+    if (snapshot.key !== this.audioKey()) {
+      // 异 key 快照：仅复位本气泡播放态（互斥：播别的条目时本条停显）
+      if (this.voicePlaying) {
+        this.voicePlaying = false;
+      }
+      return;
+    }
+    this.voicePlaying = snapshot.state === AudioState.PLAYING;
+    this.voicePositionMs = snapshot.positionMs;
+    this.voiceDurationMs = snapshot.durationMs;
+    this.voiceSpeed = snapshot.speed;
+    if (this.voicePlaying && !this.listenReported && this.model.mediaKind === MediaKind.VOICE) {
+      this.listenReported = true;
+      MessageStore.getInstance().reportListened(this.model.chatId, this.model.messageId);
     }
   };
 
   aboutToAppear(): void {
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     store.addObserver(this.fileObserver);
+    AudioPlayerController.getInstance().addObserver(this.audioObserver);
     this.refreshPhotoState();
     this.refreshThumbState();
     this.refreshDocState();
-    // 自动预载：图片选中档 + 视频封面（低/中优先级；视频本体与文件点击才拉，省流量）
+    this.refreshAudioState();
+    // 自动预载：图片选中档 + 视频封面 + 语音（未听优先；语音文件小，全量预载）
     if (this.model.photoFileId !== 0 && !store.isReady(this.model.photoFileId) &&
       !store.isFailed(this.model.photoFileId)) {
       store.downloadFile(this.model.photoFileId, DownloadPriority.PHOTO, 0, 0);
@@ -208,10 +255,15 @@ export struct MessageBubble {
       !store.isFailed(this.model.videoThumbFileId)) {
       store.downloadFile(this.model.videoThumbFileId, DownloadPriority.THUMBNAIL, 0, 0);
     }
+    if (this.model.audioFileId !== 0 && !store.isReady(this.model.audioFileId) &&
+      !store.isFailed(this.model.audioFileId)) {
+      store.downloadFile(this.model.audioFileId, DownloadPriority.THUMBNAIL, 0, 0);
+    }
   }
 
   aboutToDisappear(): void {
     FileDownloadStore.getInstance().removeObserver(this.fileObserver);
+    AudioPlayerController.getInstance().removeObserver(this.audioObserver);
   }
 
   build() {
@@ -239,6 +291,8 @@ export struct MessageBubble {
           this.mediaBubble()
         } else if (this.model.mediaKind === MediaKind.DOCUMENT) {
           this.documentBubble()
+        } else if (this.model.mediaKind === MediaKind.VOICE || this.model.mediaKind === MediaKind.AUDIO) {
+          this.voiceBubble()
         } else {
           this.textBubble()
         }
@@ -474,6 +528,297 @@ export struct MessageBubble {
         this.handlePhotoClick();
       }
     })
+  }
+
+  // ---------------- 语音/音频气泡（M6-6） ----------------
+
+  /**
+   * 语音/音频播放气泡：波形（或音频标题行）+ 播放/暂停 + 进度 + 倍速 + 未听蓝点。
+   * 点击整泡：文件未就绪 → 高优下载（完成自动开播）；就绪 → toggle 播放/暂停。
+   * 倍速角标：独立点击（不冒泡切播）。进度条 Slider 拖动 seek。
+   */
+  @Builder
+  voiceBubble() {
+    Column({ space: 6 }) {
+      Row({ space: 8 }) {
+        Stack({ alignContent: Alignment.Center }) {
+          Circle({ width: 38, height: 38 })
+            .fill(this.model.isOutgoing ? '#4DFFFFFF' : ChatUi.SEARCH_BG)
+          Text(this.voicePlaying ? '❚❚' : '▶')
+            .fontSize(this.voicePlaying ? 12 : 16)
+            .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.ACCENT)
+        }
+        .width(38)
+        .height(38)
+        .onClick((): void => {
+          this.handleVoiceClick();
+        })
+
+        Column({ space: 3 }) {
+          if (this.model.mediaKind === MediaKind.AUDIO && this.model.audioTitle.length > 0) {
+            Text(this.model.audioTitle)
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          if (this.voiceBars().length > 0) {
+            // 波形条：已播段强调色 / 未播段次级色（progress 比例着色）
+            Row({ space: 2 }) {
+              ForEach(this.voiceBars(), (bar: number, index: number) => {
+                Column()
+                  .width(3)
+                  .height(this.voiceBarHeight(bar))
+                  .borderRadius(1)
+                  .backgroundColor(this.voiceBarPlayed(index) ?
+                    (this.model.isOutgoing ? '#FFFFFF' : ChatUi.ACCENT) :
+                    (this.model.isOutgoing ? '#80FFFFFF' : ChatUi.TEXT_SECONDARY))
+              }, (bar: number, index: number) => `${index}_${bar}_${this.voiceBarPlayed(index)}`)
+            }
+            .height(30)
+            .alignItems(VerticalAlign.Center)
+          } else if (this.model.mediaKind === MediaKind.AUDIO) {
+            // 音频无波形：时长条降级
+            Text(this.model.audioDurationText)
+              .fontSize(12)
+              .fontColor(this.model.isOutgoing ? '#DCE9F7' : ChatUi.TEXT_SECONDARY)
+          }
+          Row({ space: 8 }) {
+            Text(this.voiceTimeText())
+              .fontSize(11)
+              .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+            if (this.voicePlaying || this.voiceSpeed !== 1) {
+              Text(`${this.voiceSpeed}x`)
+                .fontSize(11)
+                .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+                .onClick((): void => {
+                  AudioPlayerController.getInstance().cycleSpeed(this.audioKey());
+                })
+            }
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        // 未听蓝点（语音；播放过即上报 openMessageContent 后由 update 刷新消失）
+        if (this.model.voiceUnheard) {
+          Circle({ width: 8, height: 8 })
+            .fill(ChatUi.ACCENT)
+            .margin({ left: 4 })
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.voicePlaying || this.voicePositionMs > 0) {
+        Slider({
+          value: this.voicePositionMs,
+          min: 0,
+          max: this.voiceDurationMs > 0 ? this.voiceDurationMs : 1,
+          step: 500
+        })
+          .blockColor(ChatUi.ACCENT)
+          .selectedColor(ChatUi.ACCENT)
+          .trackColor(this.model.isOutgoing ? '#80FFFFFF' : ChatUi.SEARCH_BG)
+          .height(18)
+          .onChange((value: number, mode: SliderChangeMode): void => {
+            if (mode === SliderChangeMode.End) {
+              AudioPlayerController.getInstance().seek(this.audioKey(), value);
+            }
+          })
+      }
+
+      Row({ space: 4 }) {
+        if (this.model.sendState === BubbleSendState.FAILED) {
+          Text(this.model.errorText.length > 0 ? this.model.errorText : '发送失败')
+            .fontSize(10)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: '60%' })
+            .fontColor(ChatUi.BUBBLE_ERROR)
+        }
+        if (this.model.edited) {
+          Text('已编辑')
+            .fontSize(10)
+            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+        }
+        Text(this.model.timeText)
+          .fontSize(10)
+          .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+        this.stateMark()
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.End)
+      .alignItems(VerticalAlign.Center)
+    }
+    .constraintSize({ maxWidth: '78%' })
+    .padding({ left: 11, right: 11, top: 7, bottom: 7 })
+    .borderRadius(12)
+    .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
+  }
+
+  /** 播放目标 key（chatId:messageId；AudioPlayerController 互斥匹配用） */
+  private audioKey(): string {
+    return `${this.model.chatId}:${this.model.messageId}`;
+  }
+
+  private handleVoiceClick(): void {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    const fileId: number = this.model.audioFileId;
+    if (fileId === 0) {
+      return;
+    }
+    if (store.isReady(fileId)) {
+      AudioPlayerController.getInstance().toggle(this.audioKey(), store.getLocalPath(fileId));
+      return;
+    }
+    if (!store.isActive(fileId) || store.isFailed(fileId)) {
+      store.downloadFile(fileId, DownloadPriority.USER_ACTION, 0, 0);
+    }
+    // 点击触发下载 → 完成后自动开播（onAudioFileChanged 消费）
+    this.voicePendingPlay = true;
+  }
+
+  private onAudioFileChanged(): void {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    this.voiceFileReady = store.isReady(this.model.audioFileId);
+    // 用户点击触发的下载完成 → 自动开播（videoRequested 同思路的本地标志）
+    if (this.voiceFileReady && this.voicePendingPlay) {
+      this.voicePendingPlay = false;
+      AudioPlayerController.getInstance().toggle(this.audioKey(), store.getLocalPath(this.model.audioFileId));
+    }
+  }
+
+  private voicePendingPlay: boolean = false;
+
+  private refreshAudioState(): void {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    this.voiceFileReady = this.model.audioFileId !== 0 && store.isReady(this.model.audioFileId);
+    const controller: AudioPlayerController = AudioPlayerController.getInstance();
+    if (controller.getActiveKey() === this.audioKey()) {
+      this.voicePlaying = controller.getState() === AudioState.PLAYING;
+    }
+  }
+
+  /**
+   * 波形解码：base64 → 连续 5bit LSB 位流样本（第 i 个样本 bit 偏移 = i*5，跨字节拼接）
+   * → 归一化到 4..28vp 条高，重采样为 ~44 根。PR 计划审计 R2 P1-4 修正算法。
+   */
+  private static decodeWaveform(waveform: string): Array<number> {
+    if (waveform.length === 0) {
+      return [];
+    }
+    let bytes: Uint8Array;
+    try {
+      const helper: util.Base64Helper = new util.Base64Helper();
+      bytes = helper.decodeSync(waveform);
+    } catch (err) {
+      return [];
+    }
+    const totalBits: number = bytes.length * 8;
+    const sampleCount: number = Math.floor(totalBits / 5);
+    if (sampleCount === 0) {
+      return [];
+    }
+    const samples: Array<number> = new Array<number>();
+    for (let i: number = 0; i < sampleCount; i++) {
+      const bitOffset: number = i * 5;
+      const byteIndex: number = bitOffset >> 3;
+      const bitInByte: number = bitOffset & 7;
+      let value: number = bytes[byteIndex] >> bitInByte;
+      const spill: number = bitInByte + 5 - 8;
+      if (spill > 0 && byteIndex + 1 < bytes.length) {
+        value |= bytes[byteIndex + 1] << (8 - bitInByte);
+      }
+      samples.push(value & 0x1F);
+    }
+    return samples;
+  }
+
+  /** 波形重采样为展示条（归一化 4..28vp 高度；最多 44 根） */
+  private voiceBars(): Array<number> {
+    if (this.model.voiceWaveform.length === 0) {
+      return [];
+    }
+    if (this.voiceBarCache === null) {
+      const samples: Array<number> = MessageBubble.decodeWaveform(this.model.voiceWaveform);
+      const targetCount: number = Math.min(44, samples.length);
+      if (targetCount === 0) {
+        this.voiceBarCache = [];
+        return this.voiceBarCache;
+      }
+      const groupSize: number = samples.length / targetCount;
+      const bars: Array<number> = new Array<number>();
+      for (let i: number = 0; i < targetCount; i++) {
+        let max: number = 0;
+        const start: number = Math.floor(i * groupSize);
+        const end: number = Math.min(samples.length, Math.floor((i + 1) * groupSize));
+        for (let j: number = start; j < end; j++) {
+          if (samples[j] > max) {
+            max = samples[j];
+          }
+        }
+        // 归一化：5bit 值域 0..31 → 4..28vp
+        bars.push(4 + Math.round(max * 24 / 31));
+      }
+      this.voiceBarCache = bars;
+    }
+    return this.voiceBarCache;
+  }
+
+  private voiceBarCache: Array<number> | null = null;
+
+  private voiceBarHeight(bar: number): number {
+    return bar;
+  }
+
+  /** 第 index 根是否已播（进度比例着色） */
+  private voiceBarPlayed(index: number): boolean {
+    const bars: Array<number> = this.voiceBars();
+    if (bars.length === 0 || this.voiceDurationMs <= 0) {
+      return false;
+    }
+    const ratio: number = this.voicePositionMs / this.voiceDurationMs;
+    return index / bars.length <= ratio;
+  }
+
+  /** 播放时间文本（播放中 显示 已播/总长；静止显示总长） */
+  private voiceTimeText(): string {
+    const totalMs: number = this.voiceDurationMs > 0 ? this.voiceDurationMs : this.model.audioDurationText.length > 0 ? -1 : 0;
+    if (this.model.mediaKind === MediaKind.AUDIO && this.model.audioDurationText.length > 0 && this.voiceDurationMs <= 0) {
+      return this.model.audioDurationText;
+    }
+    const total: number = this.voiceDurationMs > 0 ? this.voiceDurationMs : this.parseDurationText();
+    const played: number = Math.min(this.voicePositionMs, total > 0 ? total : this.voicePositionMs);
+    const playedText: string = MessageBubble.formatMs(played);
+    if (this.voicePlaying && total > 0) {
+      return `${playedText} / ${MessageBubble.formatMs(total)}`;
+    }
+    if (total > 0) {
+      return MessageBubble.formatMs(total);
+    }
+    return this.model.audioDurationText;
+  }
+
+  /** audioDurationText（m:ss）→ 毫秒（时长未知时估算进度用） */
+  private parseDurationText(): number {
+    const parts: Array<string> = this.model.audioDurationText.split(':');
+    if (parts.length === 2) {
+      const minutes: number = Number(parts[0]);
+      const seconds: number = Number(parts[1]);
+      if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
+        return Math.floor((minutes * 60 + seconds) * 1000);
+      }
+    }
+    return 0;
+  }
+
+  private static formatMs(ms: number): string {
+    const totalSeconds: number = Math.floor(ms / 1000);
+    const minutes: number = Math.floor(totalSeconds / 60);
+    const seconds: number = totalSeconds % 60;
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   }
 
   // ---------------- 文件气泡（经典底色 + 文件行） ----------------

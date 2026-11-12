@@ -61,6 +61,23 @@ export class DocumentInfo {
 
 export class VoiceInfo {
   durationSeconds: number = 0;
+  /** 波形 base64（voiceNote.waveform；空串 = 无波形，UI 降级纯时长条） */
+  waveform: string = '';
+  /** 未听标记（messageVoiceNote.is_listened=false 时 UI 显示蓝点） */
+  isListened: boolean = true;
+  /** 语音本体 file（FileDownloadStore.trackFile 种子用） */
+  voiceFile: Record<string, Object> | null = null;
+  voiceFileId: number = 0;
+}
+
+/** 音频（音乐）信息投影（M6-6） */
+export class AudioInfo {
+  durationSeconds: number = 0;
+  title: string = '';
+  performer: string = '';
+  fileName: string = '';
+  audioFile: Record<string, Object> | null = null;
+  audioFileId: number = 0;
 }
 
 export class AnimationInfo {
@@ -242,6 +259,30 @@ export class MessageContent {
     }
     const info: VoiceInfo = new VoiceInfo();
     info.durationSeconds = MessageContent.readNumber(note, TdField.DURATION);
+    info.waveform = MessageContent.readString(note, TdField.WAVEFORM);
+    info.isListened = content[TdField.IS_LISTENED] === true || content[TdField.IS_LISTENED] === undefined;
+    info.voiceFile = MessageContent.asRecord(note[TdField.VOICE]);
+    if (info.voiceFile !== null) {
+      info.voiceFileId = MessageContent.readNumber(info.voiceFile, TdField.ID);
+    }
+    return info;
+  }
+
+  /** messageAudio → 音频信息（M6-6；audio.audio file 供下载种子） */
+  static extractAudio(content: Record<string, Object>): AudioInfo | null {
+    const audio: Record<string, Object> | null = MessageContent.asRecord(content[TdField.AUDIO]);
+    if (audio === null) {
+      return null;
+    }
+    const info: AudioInfo = new AudioInfo();
+    info.durationSeconds = MessageContent.readNumber(audio, TdField.DURATION);
+    info.title = MessageContent.readString(audio, TdField.TITLE);
+    info.performer = MessageContent.readString(audio, TdField.PERFORMER);
+    info.fileName = MessageContent.readString(audio, TdField.FILE_NAME);
+    info.audioFile = MessageContent.asRecord(audio[TdField.AUDIO]);
+    if (info.audioFile !== null) {
+      info.audioFileId = MessageContent.readNumber(info.audioFile, TdField.ID);
+    }
     return info;
   }
 

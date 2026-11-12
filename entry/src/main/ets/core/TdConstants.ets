@@ -69,6 +69,9 @@ export class TdReq {
   // 1.8.63 schema：searchChatMessages(chat_id, topic_id:MessageTopic 可空, query, sender_id:MessageSender
   // 可空, from_message_id, offset, limit, filter:SearchMessagesFilter) = FoundChatMessages
   static readonly SEARCH_CHAT_MESSAGES: string = 'searchChatMessages';
+  // 语音已听上报（M6-6）
+  // 1.8.63 schema：openMessageContent(chat_id:int53, message_id:int53) = Ok——语音播放后标记已听
+  static readonly OPEN_MESSAGE_CONTENT: string = 'openMessageContent';
 }
 
 export class TdUpdate {
@@ -277,6 +280,11 @@ export class TdField {
   static readonly SMALL: string = 'small';
   static readonly STATUS: string = 'status';
   static readonly USER_ID: string = 'user_id';
+  // 语音/音频（M6-6；voiceNote/audio/is_listened 字段）
+  static readonly WAVEFORM: string = 'waveform';
+  static readonly IS_LISTENED: string = 'is_listened';
+  static readonly PERFORMER: string = 'performer';
+  // title 复用既有 chat.title 的 TITLE 常量（同名同值）
   static readonly FIRST_NAME: string = 'first_name';
   static readonly LAST_NAME: string = 'last_name';
   static readonly EXPIRES: string = 'expires';
@@ -311,6 +319,8 @@ export class TdField {
   static readonly VIDEO_NOTE: string = 'video_note';
   static readonly DOCUMENT: string = 'document';
   static readonly VOICE_NOTE: string = 'voice_note';
+  static readonly VOICE: string = 'voice';
+  static readonly AUDIO: string = 'audio';
   static readonly ANIMATION: string = 'animation';
   static readonly STICKER: string = 'sticker';
   static readonly CAPTION: string = 'caption';
