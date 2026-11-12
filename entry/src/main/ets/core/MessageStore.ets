@@ -196,10 +196,21 @@ export class MessageStore {
     }
   };
 
+  /** 语音已听上报（M6-6）：openMessageContent——is_listened 由 updateMessageContent 刷新 */
+  reportListened(chatId: number, messageId: number): void {
+    if (chatId === 0 || messageId <= 0 || !this.started) {
+      return;
+    }
+    TdClient.getInstance().send({
+      ['@type']: TdReq.OPEN_MESSAGE_CONTENT,
+      'chat_id': chatId,
+      'message_id': messageId
+    });
+  }
+
   // 消息被编辑（M6-3）：edit_date 写回缓存消息——updateMessageContent 只带内容不带 edit_date，
   // 「已编辑」标记依赖本更新即时出现（PR15 审计 P1-1）
-  private readonly onMessageEdited: TdRouteHandler = (update: Record<string, Object>): void => {
-    const chatId: number = this.readChatId(update);
+  private readonly onMessageEdited: TdRouteHandler = (update: Record<string, Object>): void => {    const chatId: number = this.readChatId(update);
     const cache: ChatMessageCache | undefined = this.caches.get(chatId);
     if (cache === undefined) {
       return;

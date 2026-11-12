@@ -25,7 +25,7 @@ import { TdField, TdMessageContent, TdSendingState } from '../core/TdConstants';
 import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
-import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, ReplyRef } from '../core/MessageContent';
+import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, AudioInfo, ReplyRef } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
@@ -1012,6 +1012,7 @@ export struct ChatPanel {
     const store: MessageStore = MessageStore.getInstance();
     const bubble: MessageBubbleModel = new MessageBubbleModel();
     bubble.messageId = ChatPanel.readNumber(message, TdField.ID);
+    bubble.chatId = this.chatId;
     bubble.isOutgoing = message[TdField.IS_OUTGOING] === true;
     bubble.dateSeconds = ChatPanel.readNumber(message, TdField.DATE);
     bubble.timeText = TimeFormat.formatTime(bubble.dateSeconds);
@@ -1121,12 +1122,30 @@ export struct ChatPanel {
       const voice: VoiceInfo | null = MessageContent.extractVoice(content);
       const duration: string = voice === null ? '' : MessageContent.formatDuration(voice.durationSeconds);
       bubble.placeholder = duration.length > 0 ? `[语音] ${duration}` : '[语音]';
+      if (voice !== null && voice.voiceFileId !== 0) {
+        bubble.mediaKind = kind;
+        bubble.audioFileId = voice.voiceFileId;
+        bubble.voiceWaveform = voice.waveform;
+        bubble.voiceUnheard = !voice.isListened;
+        bubble.audioDurationText = duration;
+        files.trackFile(voice.voiceFile);
+      }
+    } else if (kind === MediaKind.AUDIO) {
+      const audio: AudioInfo | null = MessageContent.extractAudio(content);
+      const duration: string = audio === null ? '' : MessageContent.formatDuration(audio.durationSeconds);
+      bubble.placeholder = duration.length > 0 ? `[音频] ${duration}` : '[音频]';
+      if (audio !== null && audio.audioFileId !== 0) {
+        bubble.mediaKind = kind;
+        bubble.audioFileId = audio.audioFileId;
+        bubble.audioDurationText = duration;
+        const title: string = audio.title.length > 0 ? audio.title : audio.fileName;
+        bubble.audioTitle = audio.performer.length > 0 ? `${title} - ${audio.performer}` : title;
+        files.trackFile(audio.audioFile);
+      }
     } else if (kind === MediaKind.ANIMATION) {
       bubble.placeholder = '[动图]';
     } else if (kind === MediaKind.STICKER) {
       bubble.placeholder = '[贴纸]';
-    } else if (kind === MediaKind.AUDIO) {
-      bubble.placeholder = '[音频]';
     }
   }
 
