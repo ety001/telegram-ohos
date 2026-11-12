@@ -47,6 +47,14 @@ class OverlayKind {
   static readonly FORWARD: string = 'forward';
 }
 
+/** 会话内搜索命中条目（M6-5；点击跳转定位） */
+class SearchHit {
+  messageId: number = 0;
+  preview: string = '';
+  timeText: string = '';
+  isOutgoing: boolean = false;
+}
+
 /** 消息流条目：分组头 / 气泡（单类 + isHeader 区分，规避 ArkTS 联合类型限制） */
 class ChatEntryModel {
   isHeader: boolean = false;
@@ -83,6 +91,14 @@ export struct ChatPanel {
   private editShowAbove: boolean = false;
   /** 转发源（M6-3）：待转发消息 id（ForwardPicker 选定目标后消费） */
   private forwardMessageId: number = 0;
+  // 会话内搜索（M6-5）：@Link 由聊天区顶栏 🔍 开关（Index lg / ChatPage sm 双入口）
+  @Link showSearch: boolean;
+  @State searchQuery: string = '';
+  @State searchHits: Array<SearchHit> = [];
+  @State searchPending: boolean = false;
+  @State searchDone: boolean = false;
+  /** 搜索请求序号（PR17 审计 P1：慢响应丢弃，防跨会话/跨查询旧结果覆盖） */
+  private searchSeq: number = 0;
   // 跳转高亮（M6-2）：目标消息 id + 到期时间戳（setTimeout 清除）
   @State highlightMessageId: number = 0;
   private highlightTimer: number = -1;
@@ -167,6 +183,10 @@ export struct ChatPanel {
     this.forwardMessageId = 0;
     this.overlayKind = OverlayKind.NONE;
     this.pendingJumpId = 0;
+    // 搜索态归零（M6-5）：结果与输入属旧会话
+    this.searchQuery = '';
+    this.searchHits = [];
+    this.searchPending = false;
     if (this.highlightMessageId !== 0) {
       this.highlightMessageId = 0;
       if (this.highlightTimer >= 0) {
@@ -184,6 +204,10 @@ export struct ChatPanel {
 
   build() {
     Column() {
+      // 会话内搜索条（M6-5）：顶栏 🔍 开关；Enter/按钮触发；结果面板随展示
+      if (this.showSearch) {
+        this.searchBar()
+      }
       if (this.loadingOlder) {
         Text('加载更早消息…')
           .fontSize(11)
@@ -262,6 +286,149 @@ export struct ChatPanel {
         action.dismiss();
       }
     })
+  }
+
+  /** 会话内搜索条 + 结果面板（M6-5）：命中项点击 → jumpToMessage（复用 M6-2 跳转+高亮） */
+  @Builder
+  searchBar() {
+    Column() {
+      Row({ space: 8 }) {
+        TextInput({ text: this.searchQuery, placeholder: '搜索本会话消息' })
+          .layoutWeight(1)
+          .height(36)
+          .borderRadius(18)
+          .backgroundColor(ChatUi.INPUT_BG)
+          .fontColor(ChatUi.TEXT_PRIMARY)
+          .fontSize(14)
+          .placeholderColor(ChatUi.TEXT_SECONDARY)
+          .placeholderFont({ size: 13 })
+          .padding({ left: 14, right: 14 })
+          .enterKeyType(EnterKeyType.Search)
+          .onChange((value: string): void => {
+            this.searchQuery = value;
+          })
+          .onSubmit((enterKey: EnterKeyType, event: SubmitEvent): void => {
+            event.keepEditableState();
+            this.runSearch();
+          })
+        Text(this.searchPending ? '…' : '搜索')
+          .fontSize(14)
+          .fontColor(ChatUi.ACCENT)
+          .height(32)
+          .padding({ left: 12, right: 12 })
+          .textAlign(TextAlign.Center)
+          .onClick((): void => {
+            this.runSearch();
+          })
+        Text('✕')
+          .fontSize(14)
+          .fontColor(ChatUi.TEXT_SECONDARY)
+          .width(30)
+          .height(32)
+          .textAlign(TextAlign.Center)
+          .onClick((): void => {
+            this.closeSearch();
+          })
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+
+      if (this.searchHits.length > 0) {
+        Column() {
+          List() {
+            ForEach(this.searchHits, (hit: SearchHit) => {
+              ListItem() {
+                Row({ space: 10 }) {
+                  Column({ space: 2 }) {
+                    Text(hit.isOutgoing ? '你' : '')
+                      .fontSize(hit.isOutgoing ? 11 : 0)
+                      .fontColor(ChatUi.ACCENT)
+                      .height(hit.isOutgoing ? 14 : 0)
+                    Text(hit.preview.length > 0 ? hit.preview : '[消息]')
+                      .fontSize(13)
+                      .fontColor(ChatUi.TEXT_PRIMARY)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  Text(hit.timeText)
+                    .fontSize(11)
+                    .fontColor(ChatUi.TEXT_SECONDARY)
+                }
+                .width('100%')
+                .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                .alignItems(VerticalAlign.Center)
+                .onClick((): void => {
+                  const target: number = hit.messageId;
+                  this.closeSearch();
+                  this.jumpToMessage(target);
+                })
+              }
+            }, (hit: SearchHit) => `${hit.messageId}_${hit.preview}`)
+          }
+          .width('100%')
+          .constraintSize({ maxHeight: 240 })
+          .scrollBar(BarState.Auto)
+        }
+        .width('100%')
+        .backgroundColor(ChatUi.SEARCH_BG)
+      } else if (this.searchDone && !this.searchPending) {
+        // 已搜索且无命中（区分未搜索空态——PR17 审计 P2①）
+        Text('未找到匹配消息')
+          .fontSize(12)
+          .fontColor(ChatUi.TEXT_SECONDARY)
+          .opacity(0.7)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 4, bottom: 6 })
+      }
+    }
+    .width('100%')
+    .backgroundColor(ChatUi.LIST_BG)
+  }
+
+  private runSearch(): void {
+    const query: string = this.searchQuery.trim();
+    if (query.length === 0 || this.chatId === 0) {
+      return;
+    }
+    this.searchPending = true;
+    this.searchDone = false;
+    this.searchSeq += 1;
+    const seq: number = this.searchSeq;
+    const chatId: number = this.chatId;
+    MessageStore.getInstance().searchInChat(chatId, query)
+      .then((messages: Array<Record<string, Object>>): void => {
+        if (seq !== this.searchSeq || chatId !== this.chatId) {
+          return; // PR17 审计 P1：迟到的旧请求/旧会话响应丢弃
+        }
+        this.searchPending = false;
+        this.searchDone = true;
+        const hits: Array<SearchHit> = new Array<SearchHit>();
+        for (const message of messages) {
+          const hit: SearchHit = new SearchHit();
+          hit.messageId = ChatPanel.readNumber(message, TdField.ID);
+          if (hit.messageId === 0) {
+            continue;
+          }
+          hit.preview = MessageContent.previewTextOf(message);
+          const dateSeconds: number = ChatPanel.readNumber(message, TdField.DATE);
+          hit.timeText = TimeFormat.formatChatListTime(dateSeconds, Date.now());
+          hit.isOutgoing = message[TdField.IS_OUTGOING] === true;
+          hits.push(hit);
+        }
+        this.searchHits = hits;
+      });
+  }
+
+  private closeSearch(): void {
+    this.showSearch = false;
+    this.searchQuery = '';
+    this.searchHits = [];
+    this.searchPending = false;
+    this.searchDone = false;
+    this.searchSeq += 1;
   }
 
   /** 全屏覆盖层内容（photo：pinch 缩放预览 / video：XComponent + AVPlayer / forward：转发选择器） */

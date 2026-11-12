@@ -17,6 +17,8 @@ import { ChatUi } from './ChatUi';
 struct ChatPage {
   @State chatId: number = 0;
   @State chatTitle: string = '';
+  /** 会话内搜索开关（M6-5，@Link 传入 ChatPanel） */
+  @State showSearch: boolean = false;
   private readonly storeObserver: ChatListObserver = (): void => {
     this.refreshTitle();
   };
@@ -48,7 +50,7 @@ struct ChatPage {
 
   build() {
     Column() {
-      // 顶部栏：返回 + 会话名
+      // 顶部栏：返回 + 会话名 + 搜索入口（M6-5）
       Row({ space: 12 }) {
         Text('<')
           .fontSize(24)
@@ -66,6 +68,14 @@ struct ChatPage {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
+        Text('🔍')
+          .fontSize(18)
+          .width(32)
+          .height(32)
+          .textAlign(TextAlign.Center)
+          .onClick((): void => {
+            this.showSearch = !this.showSearch;
+          })
       }
       .width('100%')
       .height(52)
@@ -75,7 +85,7 @@ struct ChatPage {
 
       // 消息流 + 输入区：ChatPanel 内嵌（生命周期/已读上报由组件自理）
       if (this.chatId !== 0) {
-        ChatPanel({ chatId: this.chatId })
+        ChatPanel({ chatId: this.chatId, showSearch: $showSearch })
       }
     }
     .width('100%')

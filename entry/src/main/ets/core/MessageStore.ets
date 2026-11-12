@@ -55,6 +55,8 @@ const VIEW_COUNT_LIMIT: number = 20;
 /** 跳转定位的上下文窗口参数（M6-2/5）：offset=-15 且 limit=40 ≥ |offset|（schema 约束） */
 const JUMP_CONTEXT_BEFORE: number = 15;
 const JUMP_CONTEXT_LIMIT: number = 40;
+/** 会话内搜索结果上限（M6-5） */
+const SEARCH_RESULT_LIMIT: number = 50;
 
 export type MessageStoreObserver = (chatId: number) => void;
 
@@ -989,6 +991,59 @@ export class MessageStore {
           reject('操作超时');
         });
     });
+  }
+
+  /**
+   * 会话内搜索（M6-5）：searchChatMessages（filter 空集 = 全类型）→ foundChatMessages.messages。
+   * 结果不入库（点击跳转时 loadAroundMessage 按需拉上下文）；error/超时 resolve 空数组。
+   */
+  searchInChat(chatId: number, query: string): Promise<Array<Record<string, Object>>> {
+    const trimmed: string = query.trim();
+    const empty: Array<Record<string, Object>> = new Array<Record<string, Object>>();
+    if (chatId === 0 || trimmed.length === 0 || !this.started) {
+      return Promise.resolve(empty);
+    }
+    this.actionSeq += 1;
+    const extra: string = `searchChatMessages_${this.actionSeq}`;
+    const promise: Promise<Array<Record<string, Object>>> = new Promise<Array<Record<string, Object>>>(
+      (resolve: (messages: Array<Record<string, Object>>) => void): void => {
+        TdUpdateRouter.getInstance().waitForExtra(extra, HISTORY_TIMEOUT_MS)
+          .then((update: Record<string, Object>): void => {
+            const typeObj: Object | undefined = update[TdField.TYPE];
+            const type: string = typeof typeObj === 'string' ? typeObj : '';
+            if (type === ErrorType.INVALID) {
+              resolve(empty);
+              return;
+            }
+            const messagesObj: Object | undefined = update[TdUpdate.MESSAGES];
+            const list: Array<Object> = Array.isArray(messagesObj) ? messagesObj as Array<Object> : [];
+            const messages: Array<Record<string, Object>> = new Array<Record<string, Object>>();
+            for (const item of list) {
+              const message: Record<string, Object> | null = this.asRecord(item);
+              if (message !== null) {
+                messages.push(message);
+              }
+            }
+            hilog.info(LOG_DOMAIN, TAG, 'searchInChat: chat=%{public}s hits=%{public}d', `${chatId}`, messages.length);
+            resolve(messages);
+          })
+          .catch((reason: string): void => {
+            resolve(empty);
+          });
+      });
+    const filter: Record<string, Object> = { ['@type']: TdType.SEARCH_MESSAGES_FILTER_EMPTY };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEARCH_CHAT_MESSAGES,
+      'chat_id': chatId,
+      'query': trimmed,
+      'from_message_id': 0,
+      'offset': 0,
+      'limit': SEARCH_RESULT_LIMIT,
+      'filter': filter
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    return promise;
   }
 
   /** 失败重试：删除失败占位（本地 + TDLib）后按原文重发 */
