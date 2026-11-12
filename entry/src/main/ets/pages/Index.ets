@@ -145,6 +145,11 @@ struct Index {
     ChatListStore.getInstance().removeObserver(this.listObserver);
     NotificationService.getInstance().removeChatRouteObserver(this.notificationChatObserver);
     this.dataSource.dispose();
+    // PR16 审计 P2：销毁清防抖 timer（悬挂回调不再触发）
+    if (this.serverSearchTimer >= 0) {
+      clearTimeout(this.serverSearchTimer);
+      this.serverSearchTimer = -1;
+    }
   }
 
   /** 会话仓库生命周期：ready 拉首屏；离开 ready（登出/重登）重置，authState 流转自动回登录页 */

@@ -89,7 +89,7 @@ export class UserStore {
   }
 
   reset(): void {
-    if (!this.started && this.users.size === 0) {
+    if (!this.started && this.users.size === 0 && this.statusByUser.size === 0) {
       return;
     }
     this.users.clear();

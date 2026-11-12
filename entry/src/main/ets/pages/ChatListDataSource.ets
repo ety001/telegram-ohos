@@ -126,7 +126,8 @@ export class ChatListDataSource implements IDataSource {
     }
     if (this.keyword.length > 0) {
       for (const chatId of this.serverIds) {
-        if (!ids.includes(chatId)) {
+        // PR16 审计 P1：getChat 补拉空窗期未入库的命中项不进列表（空行+重复 key"0"）
+        if (!ids.includes(chatId) && store.getChat(chatId) !== undefined) {
           ids.push(chatId);
         }
       }
