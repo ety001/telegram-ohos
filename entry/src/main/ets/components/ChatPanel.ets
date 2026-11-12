@@ -29,6 +29,7 @@ import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInf
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
+import { AuthService, AppAuthState } from '../core/AuthService';
 import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyCode } from '@kit.InputKit';
@@ -70,6 +71,17 @@ export struct ChatPanel {
   /** 已 activate 的会话 id（@Watch 换会话时先 deactivate，@Watch 回调不提供旧值故自记） */
   private activatedChatId: number = 0;
   private firstVisibleIndex: number = 0;
+  /**
+   * 受控 TextArea 回声守卫（PR13 审计 P1-2）：程序化改写 inputText（发送清空/切会话恢复）后，
+   * IME 组合态可能携旧值再触发一次 onChange 回填。改写前把「即将被替换的旧文本」记入守卫字段，
+   * onChange 命中同值即判回声丢弃（一次性，命中即清）。新输入产生不同值不受影响。
+   */
+  private inputEchoGuard: string = '';
+
+  private applyProgrammaticInput(text: string): void {
+    this.inputEchoGuard = this.inputText;
+    this.inputText = text;
+  }
   /** 首屏定位标记：首次数据到达前不做锚定/跟底 */
   private positioned: boolean = false;
   private readonly storeObserver: MessageStoreObserver = (chatId: number): void => {
@@ -86,8 +98,12 @@ export struct ChatPanel {
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
     if (this.activatedChatId !== 0) {
-      // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）
-      DraftStore.getInstance().save(this.activatedChatId, this.inputText);
+      // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）。
+      // PR13 审计 P1-1：登出流程 reset 先行、组件后拆卸——此时登录态已离开 ready，
+      // 残留 inputText 若回写会把跨账号内容塞进已清空的草稿仓，故按登录态守卫跳过
+      if (AuthService.getInstance().getAuthState() === AppAuthState.READY) {
+        DraftStore.getInstance().save(this.activatedChatId, this.inputText);
+      }
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
       // 通知触发规则接线：组件销毁后该会话不再视为「用户正在看」（新消息恢复通知）。
       // 直接清 0（而非尝试恢复某个「上一会话」）的前提：Index 通知路由已做 sm 栈归一化
@@ -119,8 +135,8 @@ export struct ChatPanel {
     NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
-    // 恢复新会话本地草稿（M6-1；无草稿为空串）
-    this.inputText = DraftStore.getInstance().restore(this.chatId);
+    // 恢复新会话本地草稿（M6-1；无草稿为空串）。守卫旧文本防 IME 回声（PR13 审计 P1-2）
+    this.applyProgrammaticInput(DraftStore.getInstance().restore(this.chatId));
     if (this.chatId !== 0) {
       MessageStore.getInstance().activateChat(this.chatId);
       this.rebuild();
@@ -309,6 +325,12 @@ export struct ChatPanel {
           .maxLines(5)
           .textOverflow(TextOverflow.Ellipsis)
           .onChange((value: string): void => {
+            // 回声守卫：程序化改写后的第一次 onChange 携旧值（IME 组合态回流）→ 丢弃
+            if (this.inputEchoGuard.length > 0 && value === this.inputEchoGuard) {
+              this.inputEchoGuard = '';
+              return;
+            }
+            this.inputEchoGuard = '';
             this.inputText = value;
           })
           .onKeyEvent((event: KeyEvent): void => {
@@ -375,7 +397,8 @@ export struct ChatPanel {
       return;
     }
     MessageStore.getInstance().sendText(this.chatId, text);
-    this.inputText = '';
+    // 守卫旧文本防发送清空后的 IME 回声（PR13 审计 P1-2）
+    this.applyProgrammaticInput('');
     // 发送成功即清本地草稿（云端草稿由 sendText 的 clear_draft 顺带清理）
     DraftStore.getInstance().clear(this.chatId);
   }

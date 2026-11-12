@@ -48,13 +48,6 @@ export class TdReq {
   static readonly SET_CHAT_NOTIFICATION_SETTINGS: string = 'setChatNotificationSettings';
   // 1.8.63 schema：deleteChat(chat_id:int53)——群聊将同时删除所有成员的会话（can_be_deleted_for_all_users 判定）
   static readonly DELETE_CHAT: string = 'deleteChat';
-  // 消息操作（M6）
-  // 1.8.63 schema：editMessageText(chat_id:int53, message_id:int53, reply_markup:ReplyMarkup, input_message_content:InputMessageContent)
-  static readonly EDIT_MESSAGE_TEXT: string = 'editMessageText';
-  // 1.8.63 schema：editMessageCaption(chat_id, message_id, reply_markup, caption:formattedText, show_caption_above_media:Bool)
-  static readonly EDIT_MESSAGE_CAPTION: string = 'editMessageCaption';
-  // 1.8.63 schema：forwardMessages(chat_id, topic_id:MessageTopic, from_chat_id, message_ids, options, send_copy, remove_caption)
-  static readonly FORWARD_MESSAGES: string = 'forwardMessages';
 }
 
 export class TdUpdate {
@@ -240,6 +233,9 @@ export class TdField {
   // 云端草稿（M6-1；chat.draft_message:draftMessage，draft_message 可为 null；行预览提取
   // draft_message.input_message_text.text——1.8.63 schema 字段名即 input_message_text）
   static readonly DRAFT_MESSAGE: string = 'draft_message';
+  // draftMessage 内容字段名（1.8.63：input_message_text:InputMessageContent，注意与
+  // sendMessage 入参字段 input_message_content 是两个不同字段名）
+  static readonly DRAFT_INPUT_CONTENT: string = 'input_message_text';
   // setChatNotificationSettings 入参：置 false 才能按会话粒度覆盖 mute_for（M5 会话菜单）
   static readonly USE_DEFAULT_MUTE_FOR: string = 'use_default_mute_for';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）

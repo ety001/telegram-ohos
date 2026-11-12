@@ -110,7 +110,7 @@ export class ChatUi {
     if (draft === null) {
       return '';
     }
-    const inputContent: Record<string, Object> | null = ChatUi.asRecord(draft['input_message_text']);
+    const inputContent: Record<string, Object> | null = ChatUi.asRecord(draft[TdField.DRAFT_INPUT_CONTENT]);
     if (inputContent === null) {
       return '';
     }
