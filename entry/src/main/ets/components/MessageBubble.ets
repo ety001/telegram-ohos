@@ -18,6 +18,7 @@
  * 状态角标：发送中时钟 / 失败红色感叹号（点击重试）/ 已送出单勾 / 已读双勾。
  */
 import { common } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { ChatUi } from '../pages/ChatUi';
 import { MediaKind } from '../core/MessageContent';
 import { RichSegment } from '../core/RichText';
@@ -90,13 +91,26 @@ export class MessageBubbleModel {
   /** voice/animation/sticker/audio/未知类型占位文案 */
   placeholder: string = '';
 
+  // ---------------- 回复引用（M6-2） ----------------
+  /** 被回复消息 id（0 = 无引用） */
+  replyToMessageId: number = 0;
+  /** 被回复消息所在会话（同会话=当前 chatId；跨会话引用显示来源名） */
+  replyToChatId: number = 0;
+  /** 引用条显示名（「你」/对方名/来源名；异步补拉后重建刷新） */
+  replyToName: string = '';
+  /** 引用条单行预览 */
+  replyToPreview: string = '';
+  /** 跳转高亮（M6-2/5：跳转目标短暂强调背景） */
+  highlighted: boolean = false;
+
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
     // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）；
-    // M5 追加样式指纹：仅改 entity（换链接目标/加粗范围）而文本不变的编辑同样触发重建
+    // M5 追加样式指纹：仅改 entity（换链接目标/加粗范围）而文本不变的编辑同样触发重建；
+    // M6-2 追加引用字段（补拉源消息后引用条刷新）与高亮态
     return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}` +
       `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
-      `_${this.styleKey}`;
+      `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}`;
   }
 }
 
@@ -120,6 +134,15 @@ export struct MessageBubble {
   };
   /** 视频播放回调（localPath = TDLib 沙盒绝对路径，播放页 open fd 播放） */
   onVideoOpen: (localPath: string, title: string) => void = (localPath: string, title: string): void => {
+  };
+  /** 回复动作回调（M6-2：进入回复模式，ChatPanel 挂引用预览条） */
+  onReplyAction: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** 删除动作回调（M6-2：弹删除方式选择，ChatPanel 处理） */
+  onDeleteAction: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** 引用条点击跳转回调（M6-2：滚动定位到被回复消息） */
+  onReplyJump: (messageId: number) => void = (messageId: number): void => {
   };
 
   // ---------------- 下载态（FileDownloadStore 订阅） ----------------
@@ -181,13 +204,23 @@ export struct MessageBubble {
         Blank()
           .layoutWeight(1)
       }
-      if (this.model.mediaKind === MediaKind.PHOTO || this.model.mediaKind === MediaKind.VIDEO) {
-        this.mediaBubble()
-      } else if (this.model.mediaKind === MediaKind.DOCUMENT) {
-        this.documentBubble()
-      } else {
-        this.textBubble()
+      Column() {
+        // 回复引用条（M6-2）：所有气泡类型统一置顶
+        if (this.model.replyToMessageId !== 0) {
+          this.replyQuoteBar()
+        }
+        if (this.model.mediaKind === MediaKind.PHOTO || this.model.mediaKind === MediaKind.VIDEO) {
+          this.mediaBubble()
+        } else if (this.model.mediaKind === MediaKind.DOCUMENT) {
+          this.documentBubble()
+        } else {
+          this.textBubble()
+        }
       }
+      .constraintSize({ maxWidth: '82%' })
+      .borderRadius(13)
+      // 跳转高亮（M6-2/5）：短暂强调背景色（与气泡自身底色叠加由透明度保证可辨识）
+      .backgroundColor(this.model.highlighted ? ChatUi.HIGHLIGHT_BG : Color.Transparent)
       if (!this.model.isOutgoing) {
         Blank()
           .layoutWeight(1)
@@ -195,6 +228,90 @@ export struct MessageBubble {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 2, bottom: 2 })
+    // 消息上下文菜单（M6-2）：长按（触屏/触控板）与右键（PC 鼠标）双入口，沿 Index 会话菜单模式
+    .bindContextMenu(this.bubbleMenu(), ResponseType.LongPress)
+    .bindContextMenu(this.bubbleMenu(), ResponseType.RightClick)
+  }
+
+  /** 回复引用条：来源名 + 单行预览 + 左侧强调竖线；点击跳转源消息 */
+  @Builder
+  replyQuoteBar() {
+    Row({ space: 6 }) {
+      Column()
+        .width(3)
+        .height(30)
+        .borderRadius(2)
+        .backgroundColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+      Column({ space: 1 }) {
+        Text(this.model.replyToName.length > 0 ? this.model.replyToName : '消息')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.model.replyToPreview.length > 0 ? this.model.replyToPreview : '加载中…')
+          .fontSize(12)
+          .fontColor(this.model.isOutgoing ? '#DCE9F7' : ChatUi.TEXT_SECONDARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 8, right: 8, top: 6, bottom: 2 })
+    .onClick((): void => {
+      this.onReplyJump(this.model.replyToMessageId);
+    })
+  }
+
+  /**
+   * 消息上下文菜单（M6-2）：回复 / 复制 / 删除（编辑与转发随 M6-3 加入）。
+   * 复制直接走系统剪贴板（文本优先，媒体消息回退 caption，均无则菜单项禁用态文案）。
+   */
+  @Builder
+  bubbleMenu() {
+    Menu() {
+      MenuItem({ content: '回复' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.onReplyAction(this.model.messageId);
+        })
+      if (this.copyableText().length > 0) {
+        MenuItem({ content: '复制' })
+          .contentFontColor(ChatUi.TEXT_PRIMARY)
+          .onClick((): void => {
+            this.copyToClipboard();
+          })
+      }
+      MenuItem({ content: '删除' })
+        .contentFontColor(ChatUi.BUBBLE_ERROR)
+        .onClick((): void => {
+          this.onDeleteAction(this.model.messageId);
+        })
+    }
+    // 应用为固定深色视觉，Menu 默认底色跟随系统会跳浅色——显式对齐列表底色
+    .backgroundColor(ChatUi.LIST_BG)
+    .radius(12)
+  }
+
+  /** 可复制文本：消息正文 > 媒体 caption > 空（空则不出菜单项） */
+  private copyableText(): string {
+    if (this.model.text.length > 0) {
+      return this.model.text;
+    }
+    return this.model.caption;
+  }
+
+  private copyToClipboard(): void {
+    const text: string = this.copyableText();
+    if (text.length === 0) {
+      return;
+    }
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+    pasteboard.getSystemPasteboard().setData(data).catch((): void => {
+    });
   }
 
   // ---------------- 图片 / 视频气泡（无边框纯图） ----------------

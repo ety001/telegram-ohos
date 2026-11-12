@@ -36,7 +36,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TdClient } from '../tdlib/TdClient';
 import { TdUpdateRouter, TdRouteHandler } from './TdUpdateRouter';
 import { ChatListStore } from './ChatListStore';
-import { TdReq, TdUpdate, TdField, TdMessageContent, TdInputMessage, TdMessageSource, TdSendingState, ErrorType } from './TdConstants';
+import { TdReq, TdUpdate, TdField, TdMessageContent, TdInputMessage, TdMessageSource, TdSendingState, TdType, ErrorType } from './TdConstants';
 
 const TAG: string = 'MessageStore';
 const LOG_DOMAIN: number = 0x0012;
@@ -52,6 +52,9 @@ const CACHED_CHAT_LIMIT: number = 2;
 const LOCAL_ID_BASE: number = -1000000000;
 /** 打开会话时上报已读的消息条数上限 */
 const VIEW_COUNT_LIMIT: number = 20;
+/** 跳转定位的上下文窗口参数（M6-2/5）：offset=-15 且 limit=40 ≥ |offset|（schema 约束） */
+const JUMP_CONTEXT_BEFORE: number = 15;
+const JUMP_CONTEXT_LIMIT: number = 40;
 
 export type MessageStoreObserver = (chatId: number) => void;
 
@@ -491,12 +494,17 @@ export class MessageStore {
 
   // ---------------- 发送 ----------------
 
-  /** 发送文本：本地占位（时钟态）→ sendMessage → 临时消息替换 → Succeeded/Failed 状态机 */
-  sendText(chatId: number, text: string): void {
+  /**
+   * 发送文本：本地占位（时钟态）→ sendMessage → 临时消息替换 → Succeeded/Failed 状态机。
+   * M6-2：replyToMessageId > 0 时 sendMessage 携带 reply_to:inputMessageReplyToMessage
+   * （1.8.63 schema——sendMessage 无平铺 reply_to_message_id 字段，仅 message_id 必填）。
+   */
+  sendText(chatId: number, text: string, replyToMessageId?: number): void {
     const trimmed: string = text.trim();
     if (chatId === 0 || trimmed.length === 0 || !this.started) {
       return;
     }
+    const replyId: number = replyToMessageId === undefined ? 0 : replyToMessageId;
     this.localIdSeq += 1;
     const localId: number = LOCAL_ID_BASE - this.localIdSeq;
     const formatted: Record<string, Object> = { ['@type']: TdInputMessage.FORMATTED_TEXT, 'text': trimmed };
@@ -562,6 +570,12 @@ export class MessageStore {
       'chat_id': chatId,
       'input_message_content': inputContent
     };
+    if (replyId > 0) {
+      request[TdField.REPLY_TO] = {
+        '@type': TdType.INPUT_MESSAGE_REPLY_TO_MESSAGE,
+        'message_id': replyId
+      } as Record<string, Object>;
+    }
     request[TdField.EXTRA] = extra;
     TdClient.getInstance().send(request);
   }
@@ -721,9 +735,145 @@ export class MessageStore {
     TdClient.getInstance().send(request2);
   }
 
-  /** 失败重试：删除失败占位（本地 + TDLib）后按原文重发 */
-  retrySend(chatId: number, messageId: number): void {
+  // ---------------- 消息操作（M6-2） ----------------
+
+  /**
+   * 删除消息：乐观移除本地缓存（updateDeleteMessages 到达再确认，幂等）+ deleteMessages 请求。
+   * revoke=true 双端删除（私聊/管理员场景；服务端拒绝时静默——错误含会话上下文不打日志）。
+   */
+  deleteMessages(chatId: number, messageIds: Array<number>, revoke: boolean): void {
+    if (chatId === 0 || messageIds.length === 0 || !this.started) {
+      return;
+    }
     const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+    if (cache !== undefined) {
+      let removed: number = 0;
+      for (const id of messageIds) {
+        if (this.removeById(cache, id)) {
+          removed += 1;
+        }
+      }
+      if (removed > 0) {
+        this.notifyChanged(chatId);
+      }
+    }
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.DELETE_MESSAGES,
+      'chat_id': chatId,
+      'message_ids': messageIds,
+      'revoke': revoke
+    };
+    TdClient.getInstance().send(request);
+    hilog.info(LOG_DOMAIN, TAG, 'deleteMessages: chat=%{public}s count=%{public}d revoke=%{public}s',
+      `${chatId}`, messageIds.length, `${revoke}`);
+  }
+
+  /** 本地缓存查询（引用条/跳转用；未加载返回 null） */
+  getMessageById(chatId: number, messageId: number): Record<string, Object> | null {
+    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+    if (cache === undefined) {
+      return null;
+    }
+    const found: Record<string, Object> | undefined = this.findById(cache, messageId);
+    return found === undefined ? null : found;
+  }
+
+  /**
+   * 补拉单条消息（引用条源消息不在缓存时）：getMessage → 入库（幂等）→ 通知重建。
+   * 结果为 error（消息已被删等）时静默——引用条保持「加载中…」降级文案由 UI 侧兜底。
+   */
+  fetchMessage(chatId: number, messageId: number): void {
+    if (chatId === 0 || messageId === 0 || !this.started) {
+      return;
+    }
+    if (this.getMessageById(chatId, messageId) !== null) {
+      return;
+    }
+    this.actionSeq += 1;
+    const extra: string = `getMessage_${this.actionSeq}`;
+    TdUpdateRouter.getInstance().waitForExtra(extra, HISTORY_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        if (this.readChatId(update) !== chatId) {
+          return; // error 响应（chat_id 缺失）或迟到的异会话响应：丢弃
+        }
+        const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (cache === undefined) {
+          return;
+        }
+        if (this.insertMessage(cache, update)) {
+          this.notifyChanged(chatId);
+        }
+      })
+      .catch((reason: string): void => {
+        // 超时/失败静默：引用条预览保持降级文案
+      });
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.GET_MESSAGE,
+      'chat_id': chatId,
+      'message_id': messageId
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+  }
+
+  /**
+   * 加载目标消息上下文窗口（跳转定位用，M6-2 引用条跳转 / M6-5 搜索跳转共用）：
+   * getChatHistory(from_message_id=目标id, offset=-15, limit=40)——1.8.63 schema 注释：
+   * offset 取 -99..-1 且 limit ≥ |offset| 时返回「含 from_message_id 在内的附近消息」窗口。
+   * 结果合并入缓存（幂等去重），不重置上翻游标（窗口内更旧消息自然刷新 oldestLoadedId）。
+   */
+  loadAroundMessage(chatId: number, messageId: number): void {
+    if (chatId === 0 || messageId <= 0 || !this.started) {
+      return;
+    }
+    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+    if (cache === undefined) {
+      return;
+    }
+    this.actionSeq += 1;
+    const extra: string = `historyAround_${this.actionSeq}`;
+    const generation: number = cache.generation;
+    TdUpdateRouter.getInstance().waitForExtra(extra, HISTORY_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        const live: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (live === undefined || live.generation !== generation) {
+          return;
+        }
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+        if (type === ErrorType.INVALID) {
+          return; // 目标消息不可达（已删除/权限）：静默，UI 跳转保持现状
+        }
+        const listObj: Object | undefined = update[TdUpdate.MESSAGES];
+        const list: Array<Object> = Array.isArray(listObj) ? listObj as Array<Object> : [];
+        for (const item of list) {
+          const message: Record<string, Object> | null = this.asRecord(item);
+          if (message !== null) {
+            this.insertMessage(live, message);
+          }
+        }
+        this.refreshOldestLoaded(live);
+        this.notifyChanged(chatId);
+        hilog.info(LOG_DOMAIN, TAG, 'historyAround: chat=%{public}s target=%{public}d got=%{public}d',
+          `${chatId}`, messageId, list.length);
+      })
+      .catch((reason: string): void => {
+        // 超时静默
+      });
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.GET_CHAT_HISTORY,
+      'chat_id': chatId,
+      'from_message_id': messageId,
+      'offset': -JUMP_CONTEXT_BEFORE,
+      'limit': JUMP_CONTEXT_LIMIT,
+      'only_local': false
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+  }
+
+  /** 失败重试：删除失败占位（本地 + TDLib）后按原文重发 */
+  retrySend(chatId: number, messageId: number): void {    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
     if (cache === undefined) {
       return;
     }

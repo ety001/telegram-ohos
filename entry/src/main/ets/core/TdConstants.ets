@@ -48,6 +48,9 @@ export class TdReq {
   static readonly SET_CHAT_NOTIFICATION_SETTINGS: string = 'setChatNotificationSettings';
   // 1.8.63 schema：deleteChat(chat_id:int53)——群聊将同时删除所有成员的会话（can_be_deleted_for_all_users 判定）
   static readonly DELETE_CHAT: string = 'deleteChat';
+  // 消息操作（M6-2）
+  // 1.8.63 schema：getMessage(chat_id:int53, message_id:int53) = Message（引用条源消息补拉）
+  static readonly GET_MESSAGE: string = 'getMessage';
 }
 
 export class TdUpdate {
@@ -150,6 +153,23 @@ export class TdMessageSource {
 }
 
 /**
+ * 消息域 @type 子类型常量（M6-2 起；reply/origin 类对象的判别与构造）。
+ * 1.8.63 schema 逐条核对：
+ * - sendMessage.reply_to 用 inputMessageReplyToMessage（仅 message_id 必填）；
+ * - message.reply_to 为 messageReplyToMessage{chat_id,message_id,quote,origin,content}——
+ *   同会话回复 origin/content 恒 null（schema 注释 may be null for messages from the same chat）；
+ * - MessageOrigin 子类型按可用名称字段解析，messageOriginUser 需 UserStore（M6-4 前降级）。
+ */
+export class TdType {
+  static readonly INPUT_MESSAGE_REPLY_TO_MESSAGE: string = 'inputMessageReplyToMessage';
+  static readonly MESSAGE_REPLY_TO_MESSAGE: string = 'messageReplyToMessage';
+  static readonly MESSAGE_ORIGIN_USER: string = 'messageOriginUser';
+  static readonly MESSAGE_ORIGIN_HIDDEN_USER: string = 'messageOriginHiddenUser';
+  static readonly MESSAGE_ORIGIN_CHANNEL: string = 'messageOriginChannel';
+  static readonly MESSAGE_ORIGIN_CHAT: string = 'messageOriginChat';
+}
+
+/**
  * TextEntityType 子类型（formattedText.entities[].type['@type']，M5 富文本渲染）。
  * 1.8.63 td_api.tl（commit f06b0bac）逐条核对；未列出的类型（custom_emoji/spoiler/block_quote/
  * media_timestamp/date_time）M5 暂按普通文本渲染（贴纸面板/剧透遮罩等属后续迭代）。
@@ -213,6 +233,10 @@ export class TdField {
   // message / 消息请求通用字段（M3）
   static readonly MESSAGE_ID: string = 'message_id';
   static readonly MESSAGE_IDS: string = 'message_ids';
+  // 回复引用（M6-2；message.reply_to / messageReplyToMessage 字段）
+  static readonly REPLY_TO: string = 'reply_to';
+  static readonly ORIGIN: string = 'origin';
+  static readonly SENDER_NAME: string = 'sender_name';
   static readonly NEW_CONTENT: string = 'new_content';
   static readonly OLD_MESSAGE_ID: string = 'old_message_id';
   static readonly SENDING_STATE: string = 'sending_state';
