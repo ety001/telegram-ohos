@@ -29,6 +29,8 @@ import { MediaSaver, SaveResult } from '../core/MediaSaver';
 const MEDIA_WIDTH: number = 240;
 const MEDIA_MAX_HEIGHT: number = 320;
 const DEFAULT_ASPECT: number = 4 / 3;
+/** 消息编辑窗口（Telegram 文本消息 48h；超出服务端必拒，菜单项直接隐藏） */
+const EDIT_WINDOW_SECONDS: number = 48 * 3600;
 
 /** 文档气泡动作态（docState） */
 class DocActionState {
@@ -102,15 +104,23 @@ export class MessageBubbleModel {
   replyToPreview: string = '';
   /** 跳转高亮（M6-2/5：跳转目标短暂强调背景） */
   highlighted: boolean = false;
+  // ---------------- 编辑与转发（M6-3） ----------------
+  /** 已编辑标记（message.edit_date > 0；时间旁「已编辑」小字） */
+  edited: boolean = false;
+  /** 转发来源名（message.forward_info.origin；名称不可解析为空串，标签仍显示） */
+  forwardFrom: string = '';
+  /** 是否转发消息（forward_info 存在；标签渲染门控，与名称可解析性解耦——PR15 审计 P1-2） */
+  forwarded: boolean = false;
 
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
     // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）；
     // M5 追加样式指纹：仅改 entity（换链接目标/加粗范围）而文本不变的编辑同样触发重建；
-    // M6-2 追加引用字段（补拉源消息后引用条刷新）与高亮态
+    // M6-2 追加引用字段（补拉源消息后引用条刷新）与高亮态；M6-3 追加已编辑/转发来源
     return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}` +
       `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
-      `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}`;
+      `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
+      `_${this.edited}_${this.forwardFrom}`;
   }
 }
 
@@ -143,6 +153,12 @@ export struct MessageBubble {
   };
   /** 引用条点击跳转回调（M6-2：滚动定位到被回复消息） */
   onReplyJump: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** 编辑动作回调（M6-3：进入编辑模式） */
+  onEditAction: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** 转发动作回调（M6-3：打开转发目标选择器） */
+  onForwardAction: (messageId: number) => void = (messageId: number): void => {
   };
 
   // ---------------- 下载态（FileDownloadStore 订阅） ----------------
@@ -205,6 +221,16 @@ export struct MessageBubble {
           .layoutWeight(1)
       }
       Column() {
+        // 转发来源标签（M6-3）：forward_info 存在即显示（名称不可解析时仅「转发的消息」）
+        if (this.model.forwarded) {
+          Text(this.model.forwardFrom.length > 0 ? `转发的消息：${this.model.forwardFrom}` : '转发的消息')
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .padding({ left: 8, right: 8, top: 6 })
+        }
         // 回复引用条（M6-2）：所有气泡类型统一置顶
         if (this.model.replyToMessageId !== 0) {
           this.replyQuoteBar()
@@ -268,8 +294,10 @@ export struct MessageBubble {
   }
 
   /**
-   * 消息上下文菜单（M6-2）：回复 / 复制 / 删除（编辑与转发随 M6-3 加入）。
+   * 消息上下文菜单（M6-2 建立，M6-3 增编辑/转发）。
    * 复制直接走系统剪贴板（文本优先，媒体消息回退 caption，均无则菜单项禁用态文案）。
+   * 编辑可用性客户端判定：自己发的 + 48h 内 + 有文本或 caption（服务端拒绝时 toast 透传，
+   * getMessageProperties.can_be_edited 精确判定登记 M7 精化）。
    */
   @Builder
   bubbleMenu() {
@@ -278,6 +306,18 @@ export struct MessageBubble {
         .contentFontColor(ChatUi.TEXT_PRIMARY)
         .onClick((): void => {
           this.onReplyAction(this.model.messageId);
+        })
+      if (this.editable()) {
+        MenuItem({ content: '编辑' })
+          .contentFontColor(ChatUi.TEXT_PRIMARY)
+          .onClick((): void => {
+            this.onEditAction(this.model.messageId);
+          })
+      }
+      MenuItem({ content: '转发' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.onForwardAction(this.model.messageId);
         })
       if (this.copyableText().length > 0) {
         MenuItem({ content: '复制' })
@@ -295,6 +335,18 @@ export struct MessageBubble {
     // 应用为固定深色视觉，Menu 默认底色跟随系统会跳浅色——显式对齐列表底色
     .backgroundColor(ChatUi.LIST_BG)
     .radius(12)
+  }
+
+  /** 编辑可用性：自己发的 + 48h 编辑窗内 + 有可编辑文本（正文或 caption） */
+  private editable(): boolean {
+    if (!this.model.isOutgoing || this.model.messageId <= 0) {
+      return false;
+    }
+    if (this.copyableText().length === 0) {
+      return false;
+    }
+    const ageSeconds: number = Math.floor(Date.now() / 1000) - this.model.dateSeconds;
+    return ageSeconds >= 0 && ageSeconds < EDIT_WINDOW_SECONDS;
   }
 
   /** 可复制文本：消息正文 > 媒体 caption > 空（空则不出菜单项） */
@@ -489,6 +541,11 @@ export struct MessageBubble {
             .constraintSize({ maxWidth: '60%' })
             .fontColor(ChatUi.BUBBLE_ERROR)
         }
+        if (this.model.edited) {
+          Text('已编辑')
+            .fontSize(10)
+            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+        }
         Text(this.model.timeText)
           .fontSize(10)
           .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
@@ -532,6 +589,11 @@ export struct MessageBubble {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .constraintSize({ maxWidth: '60%' })
             .fontColor(ChatUi.BUBBLE_ERROR)
+        }
+        if (this.model.edited) {
+          Text('已编辑')
+            .fontSize(10)
+            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
         }
         Text(this.model.timeText)
           .fontSize(10)
