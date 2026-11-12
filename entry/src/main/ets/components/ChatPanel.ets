@@ -96,6 +96,9 @@ export struct ChatPanel {
   @State searchQuery: string = '';
   @State searchHits: Array<SearchHit> = [];
   @State searchPending: boolean = false;
+  @State searchDone: boolean = false;
+  /** 搜索请求序号（PR17 审计 P1：慢响应丢弃，防跨会话/跨查询旧结果覆盖） */
+  private searchSeq: number = 0;
   // 跳转高亮（M6-2）：目标消息 id + 到期时间戳（setTimeout 清除）
   @State highlightMessageId: number = 0;
   private highlightTimer: number = -1;
@@ -370,8 +373,8 @@ export struct ChatPanel {
         }
         .width('100%')
         .backgroundColor(ChatUi.SEARCH_BG)
-      } else if (this.searchQuery.trim().length > 0 && !this.searchPending) {
-        // 已搜过且无命中（区分未搜索空态：searchPending=false 且输入非空）
+      } else if (this.searchDone && !this.searchPending) {
+        // 已搜索且无命中（区分未搜索空态——PR17 审计 P2①）
         Text('未找到匹配消息')
           .fontSize(12)
           .fontColor(ChatUi.TEXT_SECONDARY)
@@ -391,9 +394,17 @@ export struct ChatPanel {
       return;
     }
     this.searchPending = true;
-    MessageStore.getInstance().searchInChat(this.chatId, query)
+    this.searchDone = false;
+    this.searchSeq += 1;
+    const seq: number = this.searchSeq;
+    const chatId: number = this.chatId;
+    MessageStore.getInstance().searchInChat(chatId, query)
       .then((messages: Array<Record<string, Object>>): void => {
+        if (seq !== this.searchSeq || chatId !== this.chatId) {
+          return; // PR17 审计 P1：迟到的旧请求/旧会话响应丢弃
+        }
         this.searchPending = false;
+        this.searchDone = true;
         const hits: Array<SearchHit> = new Array<SearchHit>();
         for (const message of messages) {
           const hit: SearchHit = new SearchHit();
@@ -416,6 +427,8 @@ export struct ChatPanel {
     this.searchQuery = '';
     this.searchHits = [];
     this.searchPending = false;
+    this.searchDone = false;
+    this.searchSeq += 1;
   }
 
   /** 全屏覆盖层内容（photo：pinch 缩放预览 / video：XComponent + AVPlayer / forward：转发选择器） */
