@@ -109,7 +109,7 @@ export default class EntryAbility extends UIAbility {
           black: blackPixelMap
         },
         quickOperation: {
-          abilityName: 'EntryAbility',  // 点击恢复主窗口
+          abilityName: '',  // 空字符串：不显示弹窗，用事件监听处理点击
           title: 'Telegram',
           height: 200,
           moduleName: 'entry'
@@ -169,11 +169,17 @@ export default class EntryAbility extends UIAbility {
 
   /**
    * 拦截窗口关闭事件（PC 端点 X / Dock 栏右键关闭）。
-   * 返回 true 阻止关闭，隐藏窗口到托盘（完全隐藏，任务栏无图标）。
-   * 点击托盘图标可恢复窗口。
+   * 返回 true 阻止关闭，最小化窗口到任务栏。
+   * 点击任务栏/托盘图标可恢复窗口。
    */
   onPrepareToTerminate(): boolean {
-    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will hide window to tray');
+    // 防重复调用：如果已经正在最小化，直接返回 true
+    if (this.isMinimizingToTray) {
+      hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: already minimizing, skip');
+      return true;
+    }
+    
+    hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize window');
     this.isMinimizingToTray = true;
     if (this.mainWindowStage !== null) {
       try {
@@ -185,12 +191,12 @@ export default class EntryAbility extends UIAbility {
           width: properties.windowRect.width,
           height: properties.windowRect.height
         } as WindowSize;
-        // 将窗口移出屏幕实现完全隐藏（不是 minimize，minimize 会保留任务栏图标）
-        mainWindow.moveWindowTo(-9999, -9999);
+        // 最小化窗口到任务栏（HarmonyOS 主窗口无法完全移出屏幕）
+        mainWindow.minimize();
         this.isWindowHidden = true;
-        hilog.info(LOG_DOMAIN, TAG, 'window hidden to tray (moved off-screen)');
+        hilog.info(LOG_DOMAIN, TAG, 'window minimized to taskbar');
       } catch (err) {
-        hilog.error(LOG_DOMAIN, TAG, 'hide window failed: %{public}s', JSON.stringify(err));
+        hilog.error(LOG_DOMAIN, TAG, 'minimize failed: %{public}s', JSON.stringify(err));
       }
     }
     return true;  // 返回 true 阻止关闭

@@ -382,20 +382,11 @@ struct Index {
           Rect({ width: 4, height: 2 }).fill(ChatUi.TEXT_SECONDARY)
           Circle({ width: 4, height: 4 }).fill(ChatUi.TEXT_SECONDARY)
           Rect({ width: 14, height: 2 }).fill(ChatUi.TEXT_SECONDARY)
-        }
-        // 最小化按钮
-        Text('─')
-          .fontSize(16)
-          .fontColor(ChatUi.TEXT_SECONDARY)
-          .height(32)
-          .textAlign(TextAlign.Center)
-          .onClick(() => {
-            this.minimizeWindow();
-          })
-      }
-      .margin({ bottom: 18 })
-      .bindMenu(this.settingsMenu())
-    }
+         }
+       }
+       .margin({ bottom: 18 })
+       .bindMenu(this.settingsMenu())
+     }
     .width(NAV_RAIL_WIDTH)
     .height('100%')
     .alignItems(HorizontalAlign.Center)
