@@ -27,6 +27,7 @@ import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { MediaSaver, SaveResult } from '../core/MediaSaver';
 import { AudioPlayerController, AudioSnapshot, AudioState } from '../core/AudioPlayerController';
 import { MessageStore } from '../core/MessageStore';
+import { TdType } from '../core/TdConstants';
 
 /** 媒体气泡展示尺寸（vp） */
 const MEDIA_WIDTH: number = 240;
@@ -110,6 +111,24 @@ export class MessageBubbleModel {
   /** 语音/音频文件 id（下载+播放目标） */
   audioFileId: number = 0;
 
+  // ---------------- 贴纸与 GIF（M6-7） ----------------
+  /** 贴纸格式 @type（stickerFormatWebp 可直渲；tgs/webm 显示静态缩略+动效角标） */
+  stickerFormat: string = '';
+  stickerEmoji: string = '';
+  stickerFileId: number = 0;
+  stickerThumbFileId: number = 0;
+  /** 贴纸原始尺寸（512 常见；展示 clamp 到 160vp 按比例） */
+  stickerWidth: number = 0;
+  stickerHeight: number = 0;
+  /** GIF/动图本体 file id；animIsGif=true 时下载完成 Image 直渲自动播放 */
+  animFileId: number = 0;
+  animThumbFileId: number = 0;
+  animMini: string = '';
+  animIsGif: boolean = false;
+  animWidth: number = 0;
+  animHeight: number = 0;
+  animFileName: string = '';
+
   // ---------------- 回复引用（M6-2） ----------------
   /** 被回复消息 id（0 = 无引用） */
   replyToMessageId: number = 0;
@@ -137,7 +156,7 @@ export class MessageBubbleModel {
     return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}` +
       `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
       `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
-      `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}`;
+      `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}_${this.stickerFileId}_${this.animFileId}`;
   }
 }
 
@@ -197,6 +216,13 @@ export struct MessageBubble {
   @State voiceFileReady: boolean = false;
   /** 本次展示周期内已上报过已听（openMessageContent 幂等去重） */
   private listenReported: boolean = false;
+  // 贴纸/动图下载态（M6-7）
+  @State stickerReady: boolean = false;
+  @State stickerThumbReady: boolean = false;
+  @State animReady: boolean = false;
+  @State animThumbReady: boolean = false;
+  /** 动图点击待播（下载完成自动接续：GIF 就地自动播 / 视频拉起播放器） */
+  private animRequested: boolean = false;
   /**
    * 用户已点击（下载完成即自动接续动作：视频播放 / 文件保存）。
    * 已知限制（M3-media 复审固化，不修）：组件私有标志在气泡滚出复用/重建后丢失，
@@ -217,6 +243,14 @@ export struct MessageBubble {
       this.onDocFileChanged();
     } else if (fileId === this.model.audioFileId && fileId !== 0) {
       this.onAudioFileChanged();
+    } else if (fileId === this.model.stickerFileId && fileId !== 0) {
+      this.stickerReady = FileDownloadStore.getInstance().isReady(fileId);
+    } else if (fileId === this.model.stickerThumbFileId && fileId !== 0) {
+      this.stickerThumbReady = FileDownloadStore.getInstance().isReady(fileId);
+    } else if (fileId === this.model.animFileId && fileId !== 0) {
+      this.onAnimFileChanged();
+    } else if (fileId === this.model.animThumbFileId && fileId !== 0) {
+      this.animThumbReady = FileDownloadStore.getInstance().isReady(fileId);
     }
   };
 
@@ -246,6 +280,11 @@ export struct MessageBubble {
     this.refreshThumbState();
     this.refreshDocState();
     this.refreshAudioState();
+    const dlStore: FileDownloadStore = FileDownloadStore.getInstance();
+    this.stickerReady = this.model.stickerFileId !== 0 && dlStore.isReady(this.model.stickerFileId);
+    this.stickerThumbReady = this.model.stickerThumbFileId !== 0 && dlStore.isReady(this.model.stickerThumbFileId);
+    this.animReady = this.model.animFileId !== 0 && dlStore.isReady(this.model.animFileId);
+    this.animThumbReady = this.model.animThumbFileId !== 0 && dlStore.isReady(this.model.animThumbFileId);
     // 自动预载：图片选中档 + 视频封面 + 语音（未听优先；语音文件小，全量预载）
     if (this.model.photoFileId !== 0 && !store.isReady(this.model.photoFileId) &&
       !store.isFailed(this.model.photoFileId)) {
@@ -258,6 +297,25 @@ export struct MessageBubble {
     if (this.model.audioFileId !== 0 && !store.isReady(this.model.audioFileId) &&
       !store.isFailed(this.model.audioFileId)) {
       store.downloadFile(this.model.audioFileId, DownloadPriority.THUMBNAIL, 0, 0);
+    }
+    // 贴纸：仅 webp 预载本体（PR19 审计 P0-1——tgs/webm 本体不可 Image 解码，
+    // 下载完会顶掉正常缩略图）；缩略图全格式低优预载；动图：缩略图预载，
+    // 本体 GIF 低优预载（下载完自动播放），非 GIF（mp4）点击才拉
+    if (this.model.stickerFormat === TdType.STICKER_FORMAT_WEBP && this.model.stickerFileId !== 0 &&
+      !store.isReady(this.model.stickerFileId) && !store.isFailed(this.model.stickerFileId)) {
+      store.downloadFile(this.model.stickerFileId, DownloadPriority.THUMBNAIL, 0, 0);
+    }
+    if (this.model.stickerThumbFileId !== 0 && !store.isReady(this.model.stickerThumbFileId) &&
+      !store.isFailed(this.model.stickerThumbFileId)) {
+      store.downloadFile(this.model.stickerThumbFileId, DownloadPriority.THUMBNAIL, 0, 0);
+    }
+    if (this.model.animThumbFileId !== 0 && !store.isReady(this.model.animThumbFileId) &&
+      !store.isFailed(this.model.animThumbFileId)) {
+      store.downloadFile(this.model.animThumbFileId, DownloadPriority.THUMBNAIL, 0, 0);
+    }
+    if (this.model.animIsGif && this.model.animFileId !== 0 && !store.isReady(this.model.animFileId) &&
+      !store.isFailed(this.model.animFileId)) {
+      store.downloadFile(this.model.animFileId, DownloadPriority.THUMBNAIL, 0, 0);
     }
   }
 
@@ -293,6 +351,10 @@ export struct MessageBubble {
           this.documentBubble()
         } else if (this.model.mediaKind === MediaKind.VOICE || this.model.mediaKind === MediaKind.AUDIO) {
           this.voiceBubble()
+        } else if (this.model.mediaKind === MediaKind.STICKER) {
+          this.stickerBubble()
+        } else if (this.model.mediaKind === MediaKind.ANIMATION) {
+          this.animationBubble()
         } else {
           this.textBubble()
         }
@@ -819,6 +881,214 @@ export struct MessageBubble {
     const minutes: number = Math.floor(totalSeconds / 60);
     const seconds: number = totalSeconds % 60;
     return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  }
+
+  // ---------------- 贴纸与 GIF 气泡（M6-7） ----------------
+
+  /** 贴纸展示尺寸：clamp 160vp 等比（原图 512 常见） */
+  private stickerDisplaySize(): number {
+    const w: number = this.model.stickerWidth > 0 ? this.model.stickerWidth : 512;
+    const h: number = this.model.stickerHeight > 0 ? this.model.stickerHeight : 512;
+    return Math.min(160, Math.max(96, Math.round(Math.min(w, h) * 160 / 512)));
+  }
+
+  /**
+   * 贴纸气泡（无气泡底板）：webp 直渲；tgs/webm 静态缩略图 + 右下「动效」角标
+   * （动画渲染挂 M7：tgs 需 lottie 依赖、webm 需 AVPlayer VP9 验证，本批不冒进）。
+   */
+  @Builder
+  stickerBubble() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
+      if (this.stickerImageSrc().length > 0) {
+        Image(this.stickerImageSrc())
+          .width(this.stickerDisplaySize())
+          .height(this.stickerDisplaySize())
+          .objectFit(ImageFit.Contain)
+          .onClick((): void => {
+            this.handleStickerClick();
+          })
+      } else {
+        Stack({ alignContent: Alignment.Center }) {
+          Text(this.model.stickerEmoji.length > 0 ? this.model.stickerEmoji : '[贴纸]')
+            .fontSize(this.model.stickerEmoji.length > 0 ? 40 : 13)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+        }
+        .width(this.stickerDisplaySize())
+        .height(this.stickerDisplaySize())
+        .borderRadius(12)
+        .backgroundColor(ChatUi.SEARCH_BG)
+        .onClick((): void => {
+          this.handleStickerClick();
+        })
+      }
+      if (this.model.stickerFormat !== '' && this.model.stickerFormat !== TdType.STICKER_FORMAT_WEBP) {
+        Text('动效')
+          .fontSize(9)
+          .fontColor('#FFFFFF')
+          .padding({ left: 5, right: 5, top: 2, bottom: 2 })
+          .borderRadius(7)
+          .backgroundColor('#88000000')
+          .margin(4)
+      }
+    }
+  }
+
+  /** 贴纸当前展示源：本体（仅 webp 可解码，PR19 审计 P0-1）> 缩略图（tgs/webm 占位）> 空 */
+  private stickerImageSrc(): string {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    if (this.model.stickerFormat === TdType.STICKER_FORMAT_WEBP && this.stickerReady) {
+      const uri: string = store.getReadyUri(this.model.stickerFileId);
+      if (uri.length > 0) {
+        return uri;
+      }
+    }
+    if (this.stickerThumbReady) {
+      const uri: string = store.getReadyUri(this.model.stickerThumbFileId);
+      if (uri.length > 0) {
+        return uri;
+      }
+    }
+    return '';
+  }
+
+  /** 贴纸加载失败重拉（点击兜底，沿图片 FAILED 补救思路；本体仅 webp 可拉） */
+  private handleStickerClick(): void {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    if (this.stickerImageSrc().length > 0) {
+      return;
+    }
+    if (this.model.stickerFormat === TdType.STICKER_FORMAT_WEBP && this.model.stickerFileId !== 0 &&
+      store.isFailed(this.model.stickerFileId) && !store.isActive(this.model.stickerFileId)) {
+      store.downloadFile(this.model.stickerFileId, DownloadPriority.USER_ACTION, 0, 0);
+      return;
+    }
+    if (this.model.stickerThumbFileId !== 0 && store.isFailed(this.model.stickerThumbFileId) &&
+      !store.isActive(this.model.stickerThumbFileId)) {
+      store.downloadFile(this.model.stickerThumbFileId, DownloadPriority.USER_ACTION, 0, 0);
+    }
+  }
+
+  /** 动图展示尺寸：clamp 240x320（沿媒体气泡上限，宽高比保持） */
+  private animDisplayWidth(): number {
+    return Math.min(240, Math.max(120, this.model.animWidth > 0 ? this.model.animWidth / 2 : 240));
+  }
+
+  private animDisplayHeight(): number {
+    const aspect: number = this.model.animWidth > 0 && this.model.animHeight > 0 ?
+      this.model.animHeight / this.model.animWidth : 1;
+    return Math.min(320, Math.max(120, Math.round(this.animDisplayWidth() * aspect)));
+  }
+
+  /**
+   * GIF/动图气泡：image/gif 下载完成 Image 直渲自动播放（ArkUI 原生 GIF 解码）；
+   * 其余（video/mp4 十or 等）缩略图 + 播放按钮 → 下载完成拉起 VideoPlayCover。
+   */
+  @Builder
+  animationBubble() {
+    Column() {
+      Stack({ alignContent: Alignment.Center }) {
+      if (this.animImageSrc().length > 0) {
+        Image(this.animImageSrc())
+          .width(this.animDisplayWidth())
+          .height(this.animDisplayHeight())
+          .objectFit(ImageFit.Cover)
+          .borderRadius(12)
+          .clip(true)
+          .onClick((): void => {
+            this.handleAnimClick();
+          })
+      } else {
+        Stack({ alignContent: Alignment.Center }) {
+          Text('[动图]')
+            .fontSize(13)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+        }
+        .width(this.animDisplayWidth())
+        .height(this.animDisplayHeight())
+        .borderRadius(12)
+        .backgroundColor(ChatUi.SEARCH_BG)
+        .onClick((): void => {
+          this.handleAnimClick();
+        })
+      }
+
+      // 非 GIF（需播放器）或 GIF 未就绪时：播放按钮覆盖（GIF 已就绪直渲不显示按钮）
+      if (!(this.model.animIsGif && this.animReady)) {
+        Stack({ alignContent: Alignment.Center }) {
+          Circle({ width: 42, height: 42 })
+            .fill('#66000000')
+          Text('▶')
+            .fontSize(18)
+            .fontColor('#FFFFFF')
+        }
+        .width(42)
+        .height(42)
+        .onClick((): void => {
+          this.handleAnimClick();
+        })
+      }
+      }
+
+      // caption（PR19 审计 P1-1：媒体气泡均应渲染 caption）
+      if (this.model.caption.length > 0) {
+        Column() {
+          this.richBody(this.model.captionSegments, this.model.caption, 14, 20)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .margin({ top: 4, left: 4, right: 4 })
+      }
+    }
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 动图当前展示源：GIF 本体 > 缩略图 > minithumbnail > 空 */
+  private animImageSrc(): string {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    if (this.model.animIsGif && this.animReady) {
+      const uri: string = store.getReadyUri(this.model.animFileId);
+      if (uri.length > 0) {
+        return uri;
+      }
+    }
+    if (this.animThumbReady) {
+      const uri: string = store.getReadyUri(this.model.animThumbFileId);
+      if (uri.length > 0) {
+        return uri;
+      }
+    }
+    return this.model.animMini.length > 0 ? `data:image/jpeg;base64,${this.model.animMini}` : '';
+  }
+
+  private handleAnimClick(): void {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    const fileId: number = this.model.animFileId;
+    if (fileId === 0) {
+      return;
+    }
+    if (store.isReady(fileId)) {
+      if (this.model.animIsGif) {
+        return; // GIF 已在播（Image 直渲），无进一步动作
+      }
+      this.onVideoOpen(store.getLocalPath(fileId), this.model.animFileName.length > 0 ? this.model.animFileName : '动图');
+      return;
+    }
+    if (!store.isActive(fileId) || store.isFailed(fileId)) {
+      store.downloadFile(fileId, DownloadPriority.USER_ACTION, 0, 0);
+    }
+    this.animRequested = true;
+  }
+
+  private onAnimFileChanged(): void {
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    this.animReady = store.isReady(this.model.animFileId);
+    if (this.animReady && this.animRequested) {
+      this.animRequested = false;
+      if (!this.model.animIsGif) {
+        this.onVideoOpen(store.getLocalPath(this.model.animFileId),
+          this.model.animFileName.length > 0 ? this.model.animFileName : '动图');
+      }
+      // GIF：animReady 置位后 animImageSrc 切本体，自动播放（无需动作）
+    }
   }
 
   // ---------------- 文件气泡（经典底色 + 文件行） ----------------

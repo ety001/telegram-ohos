@@ -25,7 +25,7 @@ import { TdField, TdMessageContent, TdSendingState } from '../core/TdConstants';
 import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
-import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, AudioInfo, ReplyRef } from '../core/MessageContent';
+import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, AudioInfo, AnimationInfo, StickerInfo, ReplyRef } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
@@ -1143,9 +1143,34 @@ export struct ChatPanel {
         files.trackFile(audio.audioFile);
       }
     } else if (kind === MediaKind.ANIMATION) {
+      const anim: AnimationInfo | null = MessageContent.extractAnimation(content);
       bubble.placeholder = '[动图]';
+      if (anim !== null && anim.animFileId !== 0) {
+        bubble.mediaKind = kind;
+        bubble.animFileId = anim.animFileId;
+        bubble.animThumbFileId = anim.thumbFileId;
+        bubble.animMini = anim.miniData;
+        bubble.animIsGif = anim.mimeType === 'image/gif';
+        bubble.animWidth = anim.width;
+        bubble.animHeight = anim.height;
+        bubble.animFileName = anim.fileName;
+        files.trackFile(anim.animFile);
+        files.trackFile(anim.thumbFile);
+      }
     } else if (kind === MediaKind.STICKER) {
-      bubble.placeholder = '[贴纸]';
+      const sticker: StickerInfo | null = MessageContent.extractSticker(content);
+      bubble.placeholder = sticker !== null && sticker.emoji.length > 0 ? sticker.emoji : '[贴纸]';
+      if (sticker !== null && (sticker.stickerFileId !== 0 || sticker.thumbFileId !== 0)) {
+        bubble.mediaKind = kind;
+        bubble.stickerFormat = sticker.formatType;
+        bubble.stickerEmoji = sticker.emoji;
+        bubble.stickerFileId = sticker.stickerFileId;
+        bubble.stickerThumbFileId = sticker.thumbFileId;
+        bubble.stickerWidth = sticker.width;
+        bubble.stickerHeight = sticker.height;
+        files.trackFile(sticker.stickerFile);
+        files.trackFile(sticker.thumbFile);
+      }
     }
   }
 
