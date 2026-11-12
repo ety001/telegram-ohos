@@ -41,6 +41,7 @@ import { TdUpdateRouter, TdRouteHandler } from './TdUpdateRouter';
 import { ChatListStore } from './ChatListStore';
 import { AuthService, AppAuthState } from './AuthService';
 import { MessageContent } from './MessageContent';
+import { ConfigStore } from './ConfigStore';
 import { TdUpdate, TdField } from './TdConstants';
 
 const TAG: string = 'NotificationService';
@@ -211,23 +212,33 @@ export class NotificationService {
   private publishForChat(chatId: number, message: Record<string, Object>): void {
     // 通知内容仅进用户可见面，不落任何日志（红线）
     const title: string = this.resolveTitle(chatId);
-    const text: string = NotificationService.truncate(
-      MessageContent.previewTextOf(message), PREVIEW_MAX_CHARS);
+    const previewPromise: Promise<string> = ConfigStore.getNotifyPreview()
+      .catch((): boolean => true)
+      .then((showPreview: boolean): string => {
+        // 预览关（M6-8）：正文固定文案，不泄露消息内容（标题仍为会话名）
+        if (!showPreview) {
+          return '你有一条新消息';
+        }
+        return NotificationService.truncate(
+          MessageContent.previewTextOf(message), PREVIEW_MAX_CHARS);
+      });
 
     this.ensurePermission()
       .then((granted: boolean): void => {
         if (!granted) {
           return; // 用户拒绝/不可用：静默降级（状态已记录，不再骚扰）
         }
-        // 授权后才计数（拒绝期消息不进「N 条新消息」，授权自愈后从 1 起算）
-        const count: number = (this.pendingByChat.get(chatId) ?? 0) + 1;
-        this.pendingByChat.set(chatId, count);
-        const additional: string = count > 1 ? `${count} 条新消息` : '';
-        this.buildWantAgent(chatId).then((agent: WantAgent): void => {
-          this.publish(chatId, agent, title, text, additional);
-        }).catch((err: BusinessError): void => {
-          hilog.warn(LOG_DOMAIN, TAG, 'getWantAgent failed: %{public}d', err.code);
-          this.rollbackPending(chatId); // 通知未发布，计数回滚（见 rollbackPending 注释）
+        previewPromise.then((text: string): void => {
+          // 授权后才计数（拒绝期消息不进「N 条新消息」，授权自愈后从 1 起算）
+          const count: number = (this.pendingByChat.get(chatId) ?? 0) + 1;
+          this.pendingByChat.set(chatId, count);
+          const additional: string = count > 1 ? `${count} 条新消息` : '';
+          this.buildWantAgent(chatId).then((agent: WantAgent): void => {
+            this.publish(chatId, agent, title, text, additional);
+          }).catch((err: BusinessError): void => {
+            hilog.warn(LOG_DOMAIN, TAG, 'getWantAgent failed: %{public}d', err.code);
+            this.rollbackPending(chatId); // 通知未发布，计数回滚（见 rollbackPending 注释）
+          });
         });
       });
   }

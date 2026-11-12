@@ -81,7 +81,6 @@ const PAGE_LOGIN: string = 'pages/LoginPage';
 const PAGE_VERIFY: string = 'pages/VerifyCodePage';
 const PAGE_PASSWORD: string = 'pages/PasswordPage';
 const PAGE_CHAT: string = 'pages/ChatPage';
-const PAGE_PROXY: string = 'pages/ProxyPage';
 
 /**
  * 首页：响应式三栏 + 会话列表 + TDLib 连通状态 + 认证路由。
@@ -283,20 +282,13 @@ struct Index {
     });
   }
 
-  /** 设置菜单（导航条/顶部栏共用）：代理设置 / 登出 */
+  /** 设置菜单（M6-8 收敛）：设置单入口 → SettingsPage（通知预览/代理/登出/关于） */
   private settingsMenu(): Array<MenuElement> {
     const items: Array<MenuElement> = [
       {
-        value: '代理设置',
+        value: '设置',
         action: (): void => {
-          this.routeToPage(PAGE_PROXY);
-        }
-      },
-      {
-        value: '登出',
-        action: (): void => {
-          // TDLib logOut → authorizationStateLoggingOut → waitPhoneNumber，Index 观察者自动回登录页
-          AuthService.getInstance().logOut();
+          this.routeToPage('pages/SettingsPage');
         }
       }
     ];
