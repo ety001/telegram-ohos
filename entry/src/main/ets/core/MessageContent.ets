@@ -84,6 +84,31 @@ export class AnimationInfo {
   fileName: string = '';
   width: number = 0;
   height: number = 0;
+  /** GIF/动图 mime（image/gif 可 Image 直渲自动播放；video/mp4 走播放器） */
+  mimeType: string = '';
+  /** minithumbnail 裸 base64（先行显示） */
+  miniData: string = '';
+  /** thumbnail.file（非 GIF 动图的静态封面） */
+  thumbFile: Record<string, Object> | null = null;
+  thumbFileId: number = 0;
+  /** 动图本体 file */
+  animFile: Record<string, Object> | null = null;
+  animFileId: number = 0;
+}
+
+/** 贴纸信息投影（M6-7；webp 静态直渲 / tgs·webm 缩略图占位+动效角标） */
+export class StickerInfo {
+  /** sticker.format @type（stickerFormatWebp/Tgs/Webm） */
+  formatType: string = '';
+  emoji: string = '';
+  width: number = 0;
+  height: number = 0;
+  /** 贴纸本体 file（webp 直渲目标） */
+  stickerFile: Record<string, Object> | null = null;
+  stickerFileId: number = 0;
+  /** thumbnail.file（tgs/webm 静态占位） */
+  thumbFile: Record<string, Object> | null = null;
+  thumbFileId: number = 0;
 }
 
 /** 回复引用定位（M6-2；message.reply_to → messageReplyToMessage 投影） */
@@ -286,7 +311,7 @@ export class MessageContent {
     return info;
   }
 
-  /** messageAnimation → 基本信息（M5 才实装播放，此处供占位展示尺寸） */
+  /** messageAnimation → 基本信息（M5 占位 / M6-7 GIF 直渲与播放扩展） */
   static extractAnimation(content: Record<string, Object>): AnimationInfo | null {
     const animation: Record<string, Object> | null = MessageContent.asRecord(content[TdField.ANIMATION]);
     if (animation === null) {
@@ -296,6 +321,51 @@ export class MessageContent {
     info.fileName = MessageContent.readString(animation, TdField.FILE_NAME);
     info.width = MessageContent.readNumber(animation, TdField.WIDTH);
     info.height = MessageContent.readNumber(animation, TdField.HEIGHT);
+    info.mimeType = MessageContent.readString(animation, TdField.MIME_TYPE);
+    const mini: Record<string, Object> | null = MessageContent.asRecord(animation[TdField.MINITHUMBNAIL]);
+    if (mini !== null) {
+      info.miniData = MessageContent.readString(mini, TdField.DATA);
+    }
+    const thumb: Record<string, Object> | null = MessageContent.asRecord(animation[TdField.THUMBNAIL]);
+    if (thumb !== null) {
+      info.thumbFile = MessageContent.asRecord(thumb[TdField.FILE]);
+      if (info.thumbFile !== null) {
+        info.thumbFileId = MessageContent.readNumber(info.thumbFile, TdField.ID);
+      }
+    }
+    info.animFile = MessageContent.asRecord(animation[TdField.ANIMATION]);
+    if (info.animFile !== null) {
+      info.animFileId = MessageContent.readNumber(info.animFile, TdField.ID);
+    }
+    return info;
+  }
+
+  /** messageSticker → 贴纸信息（M6-7） */
+  static extractSticker(content: Record<string, Object>): StickerInfo | null {
+    const sticker: Record<string, Object> | null = MessageContent.asRecord(content[TdField.STICKER]);
+    if (sticker === null) {
+      return null;
+    }
+    const info: StickerInfo = new StickerInfo();
+    info.width = MessageContent.readNumber(sticker, TdField.WIDTH);
+    info.height = MessageContent.readNumber(sticker, TdField.HEIGHT);
+    info.emoji = MessageContent.readString(sticker, TdField.EMOJI);
+    const format: Record<string, Object> | null = MessageContent.asRecord(sticker[TdField.FORMAT]);
+    if (format !== null) {
+      const typeObj: Object | undefined = format[TdField.TYPE];
+      info.formatType = typeof typeObj === 'string' ? typeObj : '';
+    }
+    info.stickerFile = MessageContent.asRecord(sticker[TdField.STICKER]);
+    if (info.stickerFile !== null) {
+      info.stickerFileId = MessageContent.readNumber(info.stickerFile, TdField.ID);
+    }
+    const thumb: Record<string, Object> | null = MessageContent.asRecord(sticker[TdField.THUMBNAIL]);
+    if (thumb !== null) {
+      info.thumbFile = MessageContent.asRecord(thumb[TdField.FILE]);
+      if (info.thumbFile !== null) {
+        info.thumbFileId = MessageContent.readNumber(info.thumbFile, TdField.ID);
+      }
+    }
     return info;
   }
 

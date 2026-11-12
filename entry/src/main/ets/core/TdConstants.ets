@@ -201,6 +201,10 @@ export class TdType {
   // 会话内搜索（M6-5；foundChatMessages 结果对象 / 过滤器空集）
   static readonly FOUND_CHAT_MESSAGES: string = 'foundChatMessages';
   static readonly SEARCH_MESSAGES_FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
+  // 贴纸格式（M6-7；sticker.format:StickerFormat 判别——webp 静态可直渲，tgs/webm 动效挂 M7）
+  static readonly STICKER_FORMAT_WEBP: string = 'stickerFormatWebp';
+  static readonly STICKER_FORMAT_TGS: string = 'stickerFormatTgs';
+  static readonly STICKER_FORMAT_WEBM: string = 'stickerFormatWebm';
 }
 
 /**
@@ -285,6 +289,9 @@ export class TdField {
   static readonly IS_LISTENED: string = 'is_listened';
   static readonly PERFORMER: string = 'performer';
   // title 复用既有 chat.title 的 TITLE 常量（同名同值）
+  // 贴纸（M6-7；sticker{format,emoji,sticker:file} / thumbnail.file）
+  static readonly FORMAT: string = 'format';
+  static readonly EMOJI: string = 'emoji';
   static readonly FIRST_NAME: string = 'first_name';
   static readonly LAST_NAME: string = 'last_name';
   static readonly EXPIRES: string = 'expires';
