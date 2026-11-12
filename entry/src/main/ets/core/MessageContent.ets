@@ -16,7 +16,8 @@
  * M3-notifications 增补 previewTextOf/contentPlaceholderOf：单行预览提取下沉 core，
  * 会话列表行（ChatUi）与本地通知正文（NotificationService）共用一份。
  */
-import { TdField, TdMessageContent } from './TdConstants';
+import { TdField, TdMessageContent, TdType } from './TdConstants';
+import { ChatListStore } from './ChatListStore';
 
 /** photoSize 投影（保留原 file 对象引用：FileDownloadStore.trackFile 需要完整 local 状态做种子） */
 export class PhotoSizeInfo {
@@ -66,6 +67,16 @@ export class AnimationInfo {
   fileName: string = '';
   width: number = 0;
   height: number = 0;
+}
+
+/** 回复引用定位（M6-2；message.reply_to → messageReplyToMessage 投影） */
+export class ReplyRef {
+  chatId: number = 0;
+  messageId: number = 0;
+  /** 跨会话回复时 origin 可能携带名称/来源（同会话恒 null） */
+  origin: Record<string, Object> | null = null;
+  /** 跨会话回复时源消息内容预览（同会话恒 null） */
+  content: Record<string, Object> | null = null;
 }
 
 /** 气泡媒体分支类型（model.mediaKind 取值） */
@@ -308,6 +319,60 @@ export class MessageContent {
       default:
         return '[消息]';
     }
+  }
+
+  // ---------------- 回复引用（M6-2） ----------------
+
+  /** message.reply_to → ReplyRef；非 messageReplyToMessage（story 回复等）或字段缺失返回 null */
+  static replyRefOf(message: Record<string, Object>): ReplyRef | null {
+    const replyTo: Record<string, Object> | null = MessageContent.asRecord(message[TdField.REPLY_TO]);
+    if (replyTo === null) {
+      return null;
+    }
+    const typeObj: Object | undefined = replyTo[TdField.TYPE];
+    if (typeObj !== TdType.MESSAGE_REPLY_TO_MESSAGE) {
+      return null;
+    }
+    const ref: ReplyRef = new ReplyRef();
+    ref.chatId = MessageContent.readNumber(replyTo, TdField.CHAT_ID);
+    ref.messageId = MessageContent.readNumber(replyTo, TdField.MESSAGE_ID);
+    if (ref.messageId === 0) {
+      return null;
+    }
+    ref.origin = MessageContent.asRecord(replyTo[TdField.ORIGIN]);
+    ref.content = MessageContent.asRecord(replyTo[TdField.CONTENT]);
+    return ref;
+  }
+
+  /**
+   * 跨会话回复的 origin 显示名：hiddenUser.sender_name > channel/chat 的会话标题 >
+   * user（M6-4 UserStore 前不可解析，降级 fallback）。
+   */
+  static originNameOf(origin: Record<string, Object> | null, fallback: string): string {
+    if (origin === null) {
+      return fallback;
+    }
+    const typeObj: Object | undefined = origin[TdField.TYPE];
+    const type: string = typeof typeObj === 'string' ? typeObj : '';
+    if (type === TdType.MESSAGE_ORIGIN_HIDDEN_USER) {
+      const name: string = MessageContent.readString(origin, TdField.SENDER_NAME);
+      return name.length > 0 ? name : fallback;
+    }
+    if (type === TdType.MESSAGE_ORIGIN_CHANNEL || type === TdType.MESSAGE_ORIGIN_CHAT) {
+      const title: string = ChatListStore.getInstance().getTitle(MessageContent.readNumber(origin, TdField.CHAT_ID));
+      return title.length > 0 ? title : fallback;
+    }
+    return fallback;
+  }
+
+  /** MessageContent 对象（非 message）的单行预览：包装为 message 形状复用 previewTextOf */
+  static previewOfContent(content: Record<string, Object> | null): string {
+    if (content === null) {
+      return '';
+    }
+    const wrapper: Record<string, Object> = {};
+    wrapper[TdField.CONTENT] = content;
+    return MessageContent.previewTextOf(wrapper);
   }
 
   /** 字节数格式化（自写）：B / KB / MB / GB，保留 1 位小数（≥100 整数位足够时省小数） */

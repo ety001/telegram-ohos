@@ -25,14 +25,16 @@ import { TdField, TdMessageContent, TdSendingState } from '../core/TdConstants';
 import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
-import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
+import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, ReplyRef } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
+import { ChatListStore } from '../core/ChatListStore';
 import { AuthService, AppAuthState } from '../core/AuthService';
 import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyCode } from '@kit.InputKit';
+import { promptAction } from '@kit.ArkUI';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 import { fileUri } from '@kit.CoreFileKit';
 
@@ -67,6 +69,14 @@ export struct ChatPanel {
   @State overlayImageSrc: string = '';
   @State overlayVideoPath: string = '';
   @State overlayVideoTitle: string = '';
+  // 回复模式（M6-2）：replyToMessageId > 0 时输入区上方挂引用预览条，发送携带 reply_to
+  @State replyToMessageId: number = 0;
+  @State replyPreviewLabel: string = '';
+  // 跳转高亮（M6-2）：目标消息 id + 到期时间戳（setTimeout 清除）
+  @State highlightMessageId: number = 0;
+  private highlightTimer: number = -1;
+  /** 待跳转消息（目标不在已加载窗口时先 loadAround 再定位；rebuild 内消费） */
+  private pendingJumpId: number = 0;
   private scroller: Scroller = new Scroller();
   /** 已 activate 的会话 id（@Watch 换会话时先 deactivate，@Watch 回调不提供旧值故自记） */
   private activatedChatId: number = 0;
@@ -135,6 +145,18 @@ export struct ChatPanel {
     NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
+    // 回复/跳转状态归零（PR14 审计 P1-1）：回复目标/高亮/待跳转均属旧会话，残留会导致
+    // reply_to 指向异会话消息（发送必拒）与幽灵高亮
+    this.replyToMessageId = 0;
+    this.replyPreviewLabel = '';
+    this.pendingJumpId = 0;
+    if (this.highlightMessageId !== 0) {
+      this.highlightMessageId = 0;
+      if (this.highlightTimer >= 0) {
+        clearTimeout(this.highlightTimer);
+        this.highlightTimer = -1;
+      }
+    }
     // 恢复新会话本地草稿（M6-1；无草稿为空串）。守卫旧文本防 IME 回声（PR13 审计 P1-2）
     this.applyProgrammaticInput(DraftStore.getInstance().restore(this.chatId));
     if (this.chatId !== 0) {
@@ -171,6 +193,15 @@ export struct ChatPanel {
                   },
                   onVideoOpen: (localPath: string, title: string): void => {
                     this.openVideoPlayer(localPath, title);
+                  },
+                  onReplyAction: (messageId: number): void => {
+                    this.startReply(messageId);
+                  },
+                  onDeleteAction: (messageId: number): void => {
+                    this.confirmDeleteMessage(messageId);
+                  },
+                  onReplyJump: (messageId: number): void => {
+                    this.jumpToMessage(messageId);
                   }
                 })
               }
@@ -305,6 +336,34 @@ export struct ChatPanel {
   @Builder
   inputBar() {
     Column() {
+      // 回复引用预览条（M6-2）：发送携带 reply_to；✕ 退出回复模式
+      if (this.replyToMessageId !== 0) {
+        Row({ space: 8 }) {
+          Column()
+            .width(3)
+            .height(26)
+            .borderRadius(2)
+            .backgroundColor(ChatUi.ACCENT)
+          Text(this.replyPreviewLabel.length > 0 ? this.replyPreviewLabel : '回复消息')
+            .fontSize(12)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(14)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .width(30)
+            .height(26)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => {
+              this.cancelReply();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 12, top: 4, bottom: 2 })
+        .alignItems(VerticalAlign.Center)
+      }
       Row({ space: 8 }) {
         Text('📎')
           .fontSize(22)
@@ -396,11 +455,116 @@ export struct ChatPanel {
     if (text.length === 0 || this.chatId === 0) {
       return;
     }
-    MessageStore.getInstance().sendText(this.chatId, text);
+    MessageStore.getInstance().sendText(this.chatId, text, this.replyToMessageId);
     // 守卫旧文本防发送清空后的 IME 回声（PR13 审计 P1-2）
     this.applyProgrammaticInput('');
-    // 发送成功即清本地草稿（云端草稿由 sendText 的 clear_draft 顺带清理）
+    // 发送成功即清本地草稿（云端草稿由 sendText 的 clear_draft 顺带清理）与回复模式
     DraftStore.getInstance().clear(this.chatId);
+    this.replyToMessageId = 0;
+    this.replyPreviewLabel = '';
+  }
+
+  // ---------------- 消息操作（M6-2） ----------------
+
+  /** 进入回复模式：预览条 = 发送方名 + 消息单行预览（模型数据自当前 entries 查找） */
+  private startReply(messageId: number): void {
+    const bubble: MessageBubbleModel | null = this.findBubbleModel(messageId);
+    if (bubble === null) {
+      return;
+    }
+    this.replyToMessageId = messageId;
+    const senderName: string = this.senderLabelOf(bubble);
+    const preview: string = bubble.text.length > 0 ? bubble.text.replace(/\s+/g, ' ').trim() :
+      (bubble.caption.length > 0 ? bubble.caption : bubble.placeholder);
+    const previewText: string = preview.length > 0 ? preview : '消息';
+    const clipped: string = previewText.length > 40 ? `${previewText.slice(0, 40)}…` : previewText;
+    this.replyPreviewLabel = `${senderName}：${clipped}`;
+  }
+
+  private cancelReply(): void {
+    this.replyToMessageId = 0;
+    this.replyPreviewLabel = '';
+  }
+
+  /** 引用条发送方名：自己 = 「你」；对方 = 会话标题（群聊精确到发送人挂 M7 用户体系） */
+  private senderLabelOf(bubble: MessageBubbleModel): string {
+    if (bubble.isOutgoing) {
+      return '你';
+    }
+    const title: string = ChatListStore.getInstance().getTitle(this.chatId);
+    return title.length > 0 ? title : '成员';
+  }
+
+  private findBubbleModel(messageId: number): MessageBubbleModel | null {
+    for (const entry of this.entries) {
+      if (entry.bubble !== null && entry.bubble.messageId === messageId) {
+        return entry.bubble;
+      }
+    }
+    return null;
+  }
+
+  /** 删除消息：ActionMenu 三选（仅自己 / 所有人 / 取消）；乐观移除由 MessageStore 承担 */
+  private confirmDeleteMessage(messageId: number): void {
+    this.getUIContext().getPromptAction().showActionMenu({
+      title: '删除消息？',
+      buttons: [
+        { text: '删除（所有人）', color: ChatUi.BUBBLE_ERROR },
+        { text: '删除（仅自己）', color: ChatUi.TEXT_PRIMARY },
+        { text: '取消', color: ChatUi.TEXT_SECONDARY }
+      ]
+    }).then((result: promptAction.ActionMenuSuccessResponse): void => {
+      const ids: Array<number> = [messageId];
+      if (result.index === 0) {
+        MessageStore.getInstance().deleteMessages(this.chatId, ids, true);
+      } else if (result.index === 1) {
+        MessageStore.getInstance().deleteMessages(this.chatId, ids, false);
+      }
+    }).catch((): void => {
+    });
+  }
+
+  /**
+   * 跳转定位：已加载 → 滚动居中 + 高亮；未加载 → loadAroundMessage 拉上下文后
+   * 由 pendingJumpId 在 rebuild 尾部自动补跳。
+   */
+  private jumpToMessage(messageId: number): void {
+    if (messageId <= 0 || this.chatId === 0) {
+      return;
+    }
+    const index: number = this.indexOfMessage(messageId);
+    if (index >= 0) {
+      this.scrollAfterRender(index, ScrollAlign.CENTER);
+      this.flashHighlight(messageId);
+      return;
+    }
+    this.pendingJumpId = messageId;
+    MessageStore.getInstance().loadAroundMessage(this.chatId, messageId);
+  }
+
+  /** entries 中定位气泡条目下标（key 前缀 m<id>_ 匹配；分组头跳过） */
+  private indexOfMessage(messageId: number): number {
+    const prefix: string = `m${messageId}_`;
+    for (let i: number = 0; i < this.entries.length; i++) {
+      const entry: ChatEntryModel = this.entries[i];
+      if (!entry.isHeader && entry.key.startsWith(prefix)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 高亮 2.5s 后自动消退（先 rebuild 应用高亮背景，到期再 rebuild 还原） */
+  private flashHighlight(messageId: number): void {
+    this.highlightMessageId = messageId;
+    this.rebuild();
+    if (this.highlightTimer >= 0) {
+      clearTimeout(this.highlightTimer);
+    }
+    this.highlightTimer = setTimeout((): void => {
+      this.highlightMessageId = 0;
+      this.rebuild();
+    }, 2500);
   }
 
   private retryMessage(messageId: number): void {
@@ -524,6 +688,17 @@ export struct ChatPanel {
       this.scrollAfterRender(entries.length - 1, ScrollAlign.END);
     }
     // 头部插入（上翻页到达）的视口稳定由 stackFromEnd 接管，不再手工锚定补偿
+
+    // 跳转补跳（M6-2）：loadAroundMessage 上下文到达后定位 pendingJumpId 目标
+    if (this.pendingJumpId !== 0) {
+      const index: number = this.indexOfMessage(this.pendingJumpId);
+      if (index >= 0) {
+        const target: number = this.pendingJumpId;
+        this.pendingJumpId = 0;
+        this.scrollAfterRender(index, ScrollAlign.CENTER);
+        this.flashHighlight(target);
+      }
+    }
   }
 
   /** 滚动定位须在 @State 渲染提交后执行（同步调用会被旧布局吞掉/钳制），延迟到下一宏任务 */
@@ -547,6 +722,8 @@ export struct ChatPanel {
     const content: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.CONTENT]);
     bubble.segments = ChatPanel.extractSegments(content, TdField.TEXT);
     this.attachMedia(bubble, message);
+    this.attachReplyInfo(bubble, message);
+    bubble.highlighted = this.highlightMessageId !== 0 && bubble.messageId === this.highlightMessageId;
     bubble.styleKey = `${RichText.fingerprint(bubble.segments)}_${RichText.fingerprint(bubble.captionSegments)}`;
     const state: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.SENDING_STATE]);
     if (state !== null) {
@@ -648,6 +825,42 @@ export struct ChatPanel {
     } else if (kind === MediaKind.AUDIO) {
       bubble.placeholder = '[音频]';
     }
+  }
+
+  /**
+   * 回复引用投影（M6-2）：
+   * - 同会话回复（主场景）：origin/content 恒 null——摘要与名称从本地缓存查源消息，
+   *   未命中异步 fetchMessage 补拉（到达后 notifyChanged → rebuild 刷新引用条）；
+   * - 跨会话回复：origin（hiddenUser 名 / channel 标题）+ content 预览。
+   */
+  private attachReplyInfo(bubble: MessageBubbleModel, message: Record<string, Object>): void {
+    const ref: ReplyRef | null = MessageContent.replyRefOf(message);
+    if (ref === null) {
+      return;
+    }
+    bubble.replyToMessageId = ref.messageId;
+    bubble.replyToChatId = ref.chatId;
+    if (ref.chatId === this.chatId) {
+      const src: Record<string, Object> | null =
+        MessageStore.getInstance().getMessageById(this.chatId, ref.messageId);
+      if (src !== null) {
+        bubble.replyToName = src[TdField.IS_OUTGOING] === true ? '你' : this.chatTitleFallback();
+        bubble.replyToPreview = MessageContent.previewTextOf(src);
+      } else {
+        bubble.replyToName = this.chatTitleFallback();
+        bubble.replyToPreview = '';
+        MessageStore.getInstance().fetchMessage(this.chatId, ref.messageId);
+      }
+    } else {
+      bubble.replyToName = MessageContent.originNameOf(ref.origin, this.chatTitleFallback());
+      bubble.replyToPreview = MessageContent.previewOfContent(ref.content);
+    }
+  }
+
+  /** 会话对方名兜底：标题（私聊即对方名/群名）；空则「成员」 */
+  private chatTitleFallback(): string {
+    const title: string = ChatListStore.getInstance().getTitle(this.chatId);
+    return title.length > 0 ? title : '成员';
   }
 
   private indexOfKey(entries: Array<ChatEntryModel>, key: string): number {
