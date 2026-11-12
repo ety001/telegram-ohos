@@ -16,6 +16,10 @@ const LOG_DOMAIN: number = 0x0011;
 export default class EntryAbility extends UIAbility {
   /** 主窗口 Stage（onPrepareToTerminate 最小化用） */
   private mainWindowStage: window.WindowStage | null = null;
+  /** Ability 是否在前台（restore() 仅在 onForeground 状态下生效，需跟踪） */
+  private isForeground: boolean = false;
+  /** 托盘点击触发的待还原标记：startAbility 拉回前台后在 onForeground 中还原窗口 */
+  private pendingRestore: boolean = false;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(LOG_DOMAIN, TAG, 'onCreate, action: %{public}s', want.action ?? '');
@@ -96,8 +100,8 @@ export default class EntryAbility extends UIAbility {
       // 注册托盘图标点击监听：quickOperation.abilityName 为空时，
       // 点击事件必须通过 statusBarIconClick 事件处理（官方文档要求）
       statusBarManager.on('statusBarIconClick', () => {
-        hilog.info(LOG_DOMAIN, TAG, 'status bar icon clicked, show main window');
-        this.showMainWindow();
+        hilog.info(LOG_DOMAIN, TAG, 'status bar icon clicked, restore main window');
+        this.restoreFromTray();
       });
       hilog.info(LOG_DOMAIN, TAG, 'status bar icon registered successfully');
     } catch (err) {
@@ -105,16 +109,46 @@ export default class EntryAbility extends UIAbility {
     }
   }
 
-  /** 显示主窗口（从托盘恢复）。最小化前的位置/大小由窗口管理器保留，无需手动还原 */
-  showMainWindow(): void {
-    if (this.mainWindowStage !== null) {
-      try {
-        const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
-        mainWindow.showWindow();
-        hilog.info(LOG_DOMAIN, TAG, 'main window shown (restored from tray)');
-      } catch (err) {
-        hilog.error(LOG_DOMAIN, TAG, 'showMainWindow failed: %{public}s', JSON.stringify(err));
-      }
+  /**
+   * 托盘点击恢复窗口。
+   * restore() 仅在「主窗口最小化 + UIAbility 处于 onForeground」时生效（官方文档约束）：
+   *   - 已在前台：直接 restore()（已在前台时该调用仅提升窗口层级）
+   *   - 在后台（X 关闭最小化后）：先 startAbility 拉自己回前台（singleton 走 onNewWant→onForeground），
+   *     再在 onForeground 中完成 restore()
+   */
+  private restoreFromTray(): void {
+    if (this.isForeground) {
+      this.restoreMainWindow();
+      return;
+    }
+    this.pendingRestore = true;
+    const want: Want = {
+      bundleName: 'com.ety001.telegramohos',
+      abilityName: 'EntryAbility',
+      moduleName: 'entry'
+    };
+    this.context.startAbility(want)
+      .then(() => hilog.info(LOG_DOMAIN, TAG, 'startAbility to foreground for restore'))
+      .catch((err: BusinessError) => {
+        hilog.error(LOG_DOMAIN, TAG, 'startAbility failed: %{public}s', JSON.stringify(err));
+        this.pendingRestore = false;
+      });
+  }
+
+  /** 还原最小化的主窗口（恢复到最小化前的大小和位置并提升到前台） */
+  private restoreMainWindow(): void {
+    if (this.mainWindowStage === null) {
+      return;
+    }
+    try {
+      const mainWindow: window.Window = this.mainWindowStage.getMainWindowSync();
+      mainWindow.restore()
+        .then(() => hilog.info(LOG_DOMAIN, TAG, 'main window restored from tray'))
+        .catch((err: BusinessError) => {
+          hilog.error(LOG_DOMAIN, TAG, 'restore failed: %{public}s', JSON.stringify(err));
+        });
+    } catch (err) {
+      hilog.error(LOG_DOMAIN, TAG, 'restoreMainWindow failed: %{public}s', JSON.stringify(err));
     }
   }
 
@@ -124,15 +158,22 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(LOG_DOMAIN, TAG, 'onForeground');
+    this.isForeground = true;
     // 前台：正打开的会话视为「用户正在看」不通知；顺带自愈通知授权状态
     NotificationService.getInstance().setForeground(true);
     // 回前台释放保活长时任务：前台不挂起无需保活，且长挂与业务不符易触发系统一致性管控
     // （NotificationService 的回前台自愈逻辑不在此处，保持不动）
     KeepAliveService.getInstance().stopKeepAlive();
+    // 托盘点击触发的还原：此刻 Ability 已回前台，restore() 才生效
+    if (this.pendingRestore) {
+      this.pendingRestore = false;
+      this.restoreMainWindow();
+    }
   }
 
   onBackground(): void {
     hilog.info(LOG_DOMAIN, TAG, 'onBackground');
+    this.isForeground = false;
     // 后台：新消息（含正打开会话）恢复通知
     NotificationService.getInstance().setForeground(false);
     // 进后台申请保活长时任务（TASK_KEEPING）保 TDLib 长连接；ready 登录态才申请（服务内判定）
@@ -142,7 +183,7 @@ export default class EntryAbility extends UIAbility {
   /**
    * 拦截窗口 X 按钮关闭（托盘/任务栏右键退出已分流至 EntryAbilityStage.onPrepareTermination）。
    * 返回 true 阻止关闭，最小化窗口；进程与 TDLib 继续运行，托盘图标保留。
-   * 点击托盘图标触发 statusBarIconClick → showMainWindow() 恢复窗口。
+   * 点击托盘图标触发 statusBarIconClick → restoreFromTray() 恢复窗口。
    */
   onPrepareToTerminate(): boolean {
     hilog.info(LOG_DOMAIN, TAG, 'onPrepareToTerminate: called! → will minimize window to tray');
