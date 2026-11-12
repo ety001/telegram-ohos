@@ -137,7 +137,7 @@ export class MessageBubbleModel {
     return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}` +
       `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
       `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
-      `_${this.edited}_${this.forwardFrom}`;
+      `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}`;
   }
 }
 
@@ -222,10 +222,10 @@ export struct MessageBubble {
 
   private readonly audioObserver: (snapshot: AudioSnapshot) => void = (snapshot: AudioSnapshot): void => {
     if (snapshot.key !== this.audioKey()) {
-      // 异 key 快照：仅复位本气泡播放态（互斥：播别的条目时本条停显）
-      if (this.voicePlaying) {
-        this.voicePlaying = false;
-      }
+      // 异 key 快照：复位本气泡全部播放态（互斥切换时停显/收滑条/复位倍速角标——PR18 审计 P2）
+      this.voicePlaying = false;
+      this.voicePositionMs = 0;
+      this.voiceSpeed = 1;
       return;
     }
     this.voicePlaying = snapshot.state === AudioState.PLAYING;
@@ -785,8 +785,8 @@ export struct MessageBubble {
 
   /** 播放时间文本（播放中 显示 已播/总长；静止显示总长） */
   private voiceTimeText(): string {
-    const totalMs: number = this.voiceDurationMs > 0 ? this.voiceDurationMs : this.model.audioDurationText.length > 0 ? -1 : 0;
-    if (this.model.mediaKind === MediaKind.AUDIO && this.model.audioDurationText.length > 0 && this.voiceDurationMs <= 0) {
+    // 总长未知（prepared 前无 duration）：降级显示消息自带时长文本
+    if (this.model.audioDurationText.length > 0 && this.voiceDurationMs <= 0) {
       return this.model.audioDurationText;
     }
     const total: number = this.voiceDurationMs > 0 ? this.voiceDurationMs : this.parseDurationText();

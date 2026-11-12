@@ -107,8 +107,12 @@ export class AudioPlayerController {
     if (this.releasing) {
       return;
     }
-    if (this.activeKey === key && this.player !== null) {
-      this.toggleCurrent();
+    if (this.activeKey === key) {
+      // PREPARING 窗口（createAVPlayer 在途，player 仍 null）重复点击：直接忽略
+      // （PR18 审计 P1-2——重复 openInternal 会双实例叠播 + fd 泄漏）
+      if (this.player !== null) {
+        this.toggleCurrent();
+      }
       return;
     }
     this.releaseAndPlay(key, localPath);
