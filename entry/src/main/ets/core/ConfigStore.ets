@@ -22,6 +22,8 @@ const KEY_PROXY_USER: string = 'proxy_user';
 const KEY_PROXY_PASSWORD: string = 'proxy_password';
 const KEY_PROXY_TYPE: string = 'proxy_type';
 const KEY_PROXY_ENABLE: string = 'proxy_enable';
+/** 通知预览开关（M6-8） */
+const KEY_NOTIFY_PREVIEW: string = 'notify_preview';
 
 /** Telegram API 凭证（my.telegram.org/apps 申请） */
 export interface ApiCredentials {
@@ -128,6 +130,20 @@ export class ConfigStore {
     await store.put(KEY_PROXY_PASSWORD, config.password);
     await store.put(KEY_PROXY_TYPE, config.proxyType);
     await store.put(KEY_PROXY_ENABLE, config.enable);
+    await store.flush();
+  }
+
+  // ---------------- 偏好设置（M6-8） ----------------
+
+  /** 通知预览开关（默认开：通知正文显示消息内容；关：仅「你有一条新消息」不泄露内容） */
+  static async getNotifyPreview(): Promise<boolean> {
+    const store: preferences.Preferences = await ConfigStore.requireStore();
+    return (await store.get(KEY_NOTIFY_PREVIEW, true)) as boolean;
+  }
+
+  static async putNotifyPreview(enable: boolean): Promise<void> {
+    const store: preferences.Preferences = await ConfigStore.requireStore();
+    await store.put(KEY_NOTIFY_PREVIEW, enable);
     await store.flush();
   }
 }

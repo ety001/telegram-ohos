@@ -6,6 +6,7 @@
     "pages/VerifyCodePage",
     "pages/PasswordPage",
     "pages/ProxyPage",
-    "pages/ChatPage"
+    "pages/ChatPage",
+    "pages/SettingsPage"
   ]
 }
