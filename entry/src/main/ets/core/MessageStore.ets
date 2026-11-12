@@ -553,7 +553,9 @@ export class MessageStore {
       });
     const inputContent: Record<string, Object> = {
       ['@type']: TdInputMessage.INPUT_MESSAGE_TEXT,
-      'text': formatted
+      'text': formatted,
+      // M6-1：发送即清云端草稿（1.8.63 唯一草稿写路径——saveDraft 已被上游移除）
+      'clear_draft': true
     };
     const request: Record<string, Object> = {
       ['@type']: TdReq.SEND_MESSAGE,

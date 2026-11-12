@@ -48,6 +48,13 @@ export class TdReq {
   static readonly SET_CHAT_NOTIFICATION_SETTINGS: string = 'setChatNotificationSettings';
   // 1.8.63 schema：deleteChat(chat_id:int53)——群聊将同时删除所有成员的会话（can_be_deleted_for_all_users 判定）
   static readonly DELETE_CHAT: string = 'deleteChat';
+  // 消息操作（M6）
+  // 1.8.63 schema：editMessageText(chat_id:int53, message_id:int53, reply_markup:ReplyMarkup, input_message_content:InputMessageContent)
+  static readonly EDIT_MESSAGE_TEXT: string = 'editMessageText';
+  // 1.8.63 schema：editMessageCaption(chat_id, message_id, reply_markup, caption:formattedText, show_caption_above_media:Bool)
+  static readonly EDIT_MESSAGE_CAPTION: string = 'editMessageCaption';
+  // 1.8.63 schema：forwardMessages(chat_id, topic_id:MessageTopic, from_chat_id, message_ids, options, send_copy, remove_caption)
+  static readonly FORWARD_MESSAGES: string = 'forwardMessages';
 }
 
 export class TdUpdate {
@@ -79,6 +86,9 @@ export class TdUpdate {
   static readonly CHAT_READ_OUTBOX: string = 'updateChatReadOutbox';
   // getChatHistory 的结果对象（@type=messages，含完整 message 数组；与 update 走同一分发入口）
   static readonly MESSAGES: string = 'messages';
+  // 云端草稿变更（M6-1；1.8.63 schema：{ chat_id, draft_message:draftMessage, positions }——
+  // 客户端无写草稿 API（saveDraft 已移除），仅其他端同步来的草稿经此更新；本地草稿走 DraftStore）
+  static readonly CHAT_DRAFT_MESSAGE: string = 'updateChatDraftMessage';
   // 媒体下载进度/完成通知（updateFile.file：含 local.path / is_downloading_* / downloaded_size）
   static readonly UPDATE_FILE: string = 'updateFile';
 }
@@ -227,6 +237,9 @@ export class TdField {
   // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
   static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';
   static readonly MUTE_FOR: string = 'mute_for';
+  // 云端草稿（M6-1；chat.draft_message:draftMessage，draft_message 可为 null；行预览提取
+  // draft_message.input_message_text.text——1.8.63 schema 字段名即 input_message_text）
+  static readonly DRAFT_MESSAGE: string = 'draft_message';
   // setChatNotificationSettings 入参：置 false 才能按会话粒度覆盖 mute_for（M5 会话菜单）
   static readonly USE_DEFAULT_MUTE_FOR: string = 'use_default_mute_for';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）

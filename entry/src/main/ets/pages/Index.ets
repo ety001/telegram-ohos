@@ -23,6 +23,7 @@ import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { MessageStore } from '../core/MessageStore';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService, ChatRouteObserver } from '../core/NotificationService';
+import { DraftStore } from '../core/DraftStore';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
@@ -155,6 +156,7 @@ struct Index {
       MessageStore.getInstance().reset();
       FileDownloadStore.getInstance().reset();
       NotificationService.getInstance().reset();
+      DraftStore.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
     }
@@ -540,12 +542,35 @@ struct Index {
         .alignItems(VerticalAlign.Center)
 
         Row() {
-          Text(item.preview)
-            .fontSize(13)
-            .fontColor(ChatUi.TEXT_SECONDARY)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
+          // 草稿优先（M6-1）：本地红前缀 > 云端灰前缀 > last_message 预览
+          if (item.draftLocal.length > 0) {
+            Text('草稿：')
+              .fontSize(13)
+              .fontColor(ChatUi.DRAFT_LOCAL)
+            Text(item.draftLocal)
+              .fontSize(13)
+              .fontColor(ChatUi.TEXT_PRIMARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          } else if (item.draftCloud.length > 0) {
+            Text('草稿：')
+              .fontSize(13)
+              .fontColor(ChatUi.TEXT_SECONDARY)
+            Text(item.draftCloud)
+              .fontSize(13)
+              .fontColor(ChatUi.TEXT_SECONDARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          } else {
+            Text(item.preview)
+              .fontSize(13)
+              .fontColor(ChatUi.TEXT_SECONDARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          }
           if (item.muted) {
             Text('静音')
               .fontSize(10)

@@ -11,6 +11,7 @@
  * 以及 searchChatsOnServer / searchPublicChat(公开会话/频道)——归入 M5「会话搜索」任务。
  */
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
+import { DraftStore, DraftObserver } from '../core/DraftStore';
 import { ChatRowModel, ChatUi } from './ChatUi';
 
 export class ChatListDataSource implements IDataSource {
@@ -21,15 +22,22 @@ export class ChatListDataSource implements IDataSource {
     this.rebuild();
     this.notifyReload();
   };
+  // 本地草稿变化（M6-1）：行预览含草稿前缀，DraftStore 通知同样触发可见行重建
+  private readonly draftObserver: DraftObserver = (): void => {
+    this.rebuild();
+    this.notifyReload();
+  };
 
   constructor() {
     ChatListStore.getInstance().addObserver(this.storeObserver);
+    DraftStore.getInstance().addObserver(this.draftObserver);
     this.rebuild();
   }
 
   /** 页面 aboutToDisappear 注销，防泄漏 */
   dispose(): void {
     ChatListStore.getInstance().removeObserver(this.storeObserver);
+    DraftStore.getInstance().removeObserver(this.draftObserver);
   }
 
   setKeyword(keyword: string): void {
