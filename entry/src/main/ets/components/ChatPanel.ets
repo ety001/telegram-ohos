@@ -36,6 +36,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyCode } from '@kit.InputKit';
 import { promptAction } from '@kit.ArkUI';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
+import { ForwardPicker } from './ForwardPicker';
 import { fileUri } from '@kit.CoreFileKit';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -43,6 +44,7 @@ class OverlayKind {
   static readonly NONE: string = '';
   static readonly PHOTO: string = 'photo';
   static readonly VIDEO: string = 'video';
+  static readonly FORWARD: string = 'forward';
 }
 
 /** 消息流条目：分组头 / 气泡（单类 + isHeader 区分，规避 ArkTS 联合类型限制） */
@@ -72,6 +74,15 @@ export struct ChatPanel {
   // 回复模式（M6-2）：replyToMessageId > 0 时输入区上方挂引用预览条，发送携带 reply_to
   @State replyToMessageId: number = 0;
   @State replyPreviewLabel: string = '';
+  // 编辑模式（M6-3）：editMessageId > 0 时输入区为「编辑消息」态（发送改调 editMessage*）
+  @State editMessageId: number = 0;
+  @State editPreviewLabel: string = '';
+  /** 编辑目标是否媒体 caption（true=editMessageCaption / false=editMessageText） */
+  private editIsCaption: boolean = false;
+  /** 编辑 caption 时原消息 show_caption_above_media 透传（schema 必填） */
+  private editShowAbove: boolean = false;
+  /** 转发源（M6-3）：待转发消息 id（ForwardPicker 选定目标后消费） */
+  private forwardMessageId: number = 0;
   // 跳转高亮（M6-2）：目标消息 id + 到期时间戳（setTimeout 清除）
   @State highlightMessageId: number = 0;
   private highlightTimer: number = -1;
@@ -145,10 +156,16 @@ export struct ChatPanel {
     NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
-    // 回复/跳转状态归零（PR14 审计 P1-1）：回复目标/高亮/待跳转均属旧会话，残留会导致
-    // reply_to 指向异会话消息（发送必拒）与幽灵高亮
+    // 回复/编辑/跳转状态归零（PR14 审计 P1-1 同源）：均属旧会话，残留会导致
+    // reply_to/editMessage 指向异会话消息（服务端必拒）与幽灵高亮
     this.replyToMessageId = 0;
     this.replyPreviewLabel = '';
+    this.editMessageId = 0;
+    this.editPreviewLabel = '';
+    this.editIsCaption = false;
+    this.editShowAbove = false;
+    this.forwardMessageId = 0;
+    this.overlayKind = OverlayKind.NONE;
     this.pendingJumpId = 0;
     if (this.highlightMessageId !== 0) {
       this.highlightMessageId = 0;
@@ -202,6 +219,12 @@ export struct ChatPanel {
                   },
                   onReplyJump: (messageId: number): void => {
                     this.jumpToMessage(messageId);
+                  },
+                  onEditAction: (messageId: number): void => {
+                    this.startEdit(messageId);
+                  },
+                  onForwardAction: (messageId: number): void => {
+                    this.openForwardPicker(messageId);
                   }
                 })
               }
@@ -241,7 +264,7 @@ export struct ChatPanel {
     })
   }
 
-  /** 全屏媒体覆盖层内容（photo：pinch 缩放预览 / video：XComponent + AVPlayer） */
+  /** 全屏覆盖层内容（photo：pinch 缩放预览 / video：XComponent + AVPlayer / forward：转发选择器） */
   @Builder
   mediaOverlayBuilder() {
     if (this.overlayKind === OverlayKind.PHOTO) {
@@ -257,6 +280,22 @@ export struct ChatPanel {
         title: this.overlayVideoTitle,
         onClose: (): void => {
           this.closeOverlay();
+        }
+      })
+    } else if (this.overlayKind === OverlayKind.FORWARD) {
+      ForwardPicker({
+        onPick: (chatId: number): void => {
+          const messageId: number = this.forwardMessageId;
+          const fromChatId: number = this.chatId;
+          this.closeOverlay();
+          this.forwardMessageId = 0;
+          if (chatId !== 0 && messageId !== 0) {
+            MessageStore.getInstance().forwardMessages(chatId, fromChatId, [messageId]);
+          }
+        },
+        onClose: (): void => {
+          this.closeOverlay();
+          this.forwardMessageId = 0;
         }
       })
     }
@@ -364,6 +403,38 @@ export struct ChatPanel {
         .padding({ left: 16, right: 12, top: 4, bottom: 2 })
         .alignItems(VerticalAlign.Center)
       }
+      // 编辑预览条（M6-3）：发送改调 editMessage*；✕ 退出编辑模式（原文不动）
+      if (this.editMessageId !== 0) {
+        Row({ space: 8 }) {
+          Column()
+            .width(3)
+            .height(26)
+            .borderRadius(2)
+            .backgroundColor(ChatUi.ACCENT)
+          Text('编辑消息')
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ChatUi.ACCENT)
+          Text(this.editPreviewLabel)
+            .fontSize(12)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text('✕')
+            .fontSize(14)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .width(30)
+            .height(26)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => {
+              this.cancelEdit();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 12, top: 4, bottom: 2 })
+        .alignItems(VerticalAlign.Center)
+      }
       Row({ space: 8 }) {
         Text('📎')
           .fontSize(22)
@@ -455,6 +526,21 @@ export struct ChatPanel {
     if (text.length === 0 || this.chatId === 0) {
       return;
     }
+    // 编辑模式（M6-3）：分流 editMessageText / editMessageCaption；失败 toast 透传服务端错误
+    if (this.editMessageId !== 0) {
+      const editId: number = this.editMessageId;
+      const isCaption: boolean = this.editIsCaption;
+      const showAbove: boolean = this.editShowAbove;
+      this.cancelEdit();
+      this.applyProgrammaticInput('');
+      const promise: Promise<void> = isCaption
+        ? MessageStore.getInstance().editMessageCaption(this.chatId, editId, text, showAbove)
+        : MessageStore.getInstance().editMessageText(this.chatId, editId, text);
+      promise.catch((reason: string): void => {
+        this.showToast(reason.length > 0 ? reason : '编辑失败');
+      });
+      return;
+    }
     MessageStore.getInstance().sendText(this.chatId, text, this.replyToMessageId);
     // 守卫旧文本防发送清空后的 IME 回声（PR13 审计 P1-2）
     this.applyProgrammaticInput('');
@@ -466,12 +552,14 @@ export struct ChatPanel {
 
   // ---------------- 消息操作（M6-2） ----------------
 
-  /** 进入回复模式：预览条 = 发送方名 + 消息单行预览（模型数据自当前 entries 查找） */
+  /** 进入回复模式：预览条 = 发送方名 + 消息单行预览（模型数据自当前 entries 查找）。
+   *  与编辑互斥：进入回复清编辑态 */
   private startReply(messageId: number): void {
     const bubble: MessageBubbleModel | null = this.findBubbleModel(messageId);
     if (bubble === null) {
       return;
     }
+    this.cancelEdit();
     this.replyToMessageId = messageId;
     const senderName: string = this.senderLabelOf(bubble);
     const preview: string = bubble.text.length > 0 ? bubble.text.replace(/\s+/g, ' ').trim() :
@@ -484,6 +572,50 @@ export struct ChatPanel {
   private cancelReply(): void {
     this.replyToMessageId = 0;
     this.replyPreviewLabel = '';
+  }
+
+  // ---------------- 编辑与转发（M6-3） ----------------
+
+  /** 进入编辑模式：文本消息走 editMessageText；媒体消息按 caption 走 editMessageCaption
+   *  （show_caption_above_media 自原 content 透传——schema 必填，漏传会改变 caption 位置） */
+  private startEdit(messageId: number): void {
+    const message: Record<string, Object> | null =
+      MessageStore.getInstance().getMessageById(this.chatId, messageId);
+    if (message === null) {
+      return;
+    }
+    const bubble: MessageBubbleModel | null = this.findBubbleModel(messageId);
+    const original: string = bubble !== null ? (bubble.text.length > 0 ? bubble.text : bubble.caption) : '';
+    this.editIsCaption = original.length > 0 && bubble !== null && bubble.text.length === 0;
+    const content: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.CONTENT]);
+    this.editShowAbove = MessageContent.showCaptionAboveOf(content);
+    this.editMessageId = messageId;
+    const clipped: string = original.length > 40 ? `${original.slice(0, 40)}…` : original;
+    this.editPreviewLabel = clipped;
+    // 回复与编辑互斥：进入编辑清回复态（反之亦然）
+    this.replyToMessageId = 0;
+    this.replyPreviewLabel = '';
+    this.applyProgrammaticInput(original);
+  }
+
+  private cancelEdit(): void {
+    this.editMessageId = 0;
+    this.editPreviewLabel = '';
+    this.editIsCaption = false;
+    this.editShowAbove = false;
+  }
+
+  /** 打开转发目标选择器（覆盖层内选定后 forwardMessages） */
+  private openForwardPicker(messageId: number): void {
+    this.forwardMessageId = messageId;
+    this.overlayKind = OverlayKind.FORWARD;
+  }
+
+  private showToast(message: string): void {
+    this.getUIContext().getPromptAction().showToast({
+      message: message,
+      duration: 2500
+    });
   }
 
   /** 引用条发送方名：自己 = 「你」；对方 = 会话标题（群聊精确到发送人挂 M7 用户体系） */
@@ -723,6 +855,9 @@ export struct ChatPanel {
     bubble.segments = ChatPanel.extractSegments(content, TdField.TEXT);
     this.attachMedia(bubble, message);
     this.attachReplyInfo(bubble, message);
+    // M6-3：已编辑标记（edit_date）与转发来源标签（forward_info.origin）
+    bubble.edited = ChatPanel.readNumber(message, TdField.EDIT_DATE) > 0;
+    bubble.forwardFrom = MessageContent.forwardFromNameOf(message);
     bubble.highlighted = this.highlightMessageId !== 0 && bubble.messageId === this.highlightMessageId;
     bubble.styleKey = `${RichText.fingerprint(bubble.segments)}_${RichText.fingerprint(bubble.captionSegments)}`;
     const state: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.SENDING_STATE]);

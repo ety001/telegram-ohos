@@ -51,6 +51,15 @@ export class TdReq {
   // 消息操作（M6-2）
   // 1.8.63 schema：getMessage(chat_id:int53, message_id:int53) = Message（引用条源消息补拉）
   static readonly GET_MESSAGE: string = 'getMessage';
+  // 消息操作（M6-3）
+  // 1.8.63 schema：editMessageText(chat_id, message_id, reply_markup:ReplyMarkup 可空, input_message_content) = Message
+  static readonly EDIT_MESSAGE_TEXT: string = 'editMessageText';
+  // 1.8.63 schema：editMessageCaption(chat_id, message_id, reply_markup, caption:formattedText,
+  // show_caption_above_media:Bool——必须从原消息 content 透传，否则原上方 caption 被移回下方)
+  static readonly EDIT_MESSAGE_CAPTION: string = 'editMessageCaption';
+  // 1.8.63 schema：forwardMessages(chat_id, topic_id:MessageTopic 可空, from_chat_id, message_ids,
+  // options:messageSendOptions 可空, send_copy:Bool, remove_caption:Bool) = Messages
+  static readonly FORWARD_MESSAGES: string = 'forwardMessages';
 }
 
 export class TdUpdate {
@@ -237,6 +246,11 @@ export class TdField {
   static readonly REPLY_TO: string = 'reply_to';
   static readonly ORIGIN: string = 'origin';
   static readonly SENDER_NAME: string = 'sender_name';
+  // 编辑与转发来源（M6-3；message.edit_date / message.forward_info:messageForwardInfo）
+  static readonly EDIT_DATE: string = 'edit_date';
+  static readonly FORWARD_INFO: string = 'forward_info';
+  // editMessageCaption 入参（M6-3；show_caption_above_media 从原 content 透传）
+  static readonly SHOW_CAPTION_ABOVE_MEDIA: string = 'show_caption_above_media';
   static readonly NEW_CONTENT: string = 'new_content';
   static readonly OLD_MESSAGE_ID: string = 'old_message_id';
   static readonly SENDING_STATE: string = 'sending_state';

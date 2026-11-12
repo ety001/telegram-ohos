@@ -365,6 +365,25 @@ export class MessageContent {
     return fallback;
   }
 
+  // ---------------- 编辑与转发来源（M6-3） ----------------
+
+  /** 转发来源名（message.forward_info.origin；非转发消息返回空串） */
+  static forwardFromNameOf(message: Record<string, Object>): string {
+    const info: Record<string, Object> | null = MessageContent.asRecord(message[TdField.FORWARD_INFO]);
+    if (info === null) {
+      return '';
+    }
+    return MessageContent.originNameOf(MessageContent.asRecord(info[TdField.ORIGIN]), '');
+  }
+
+  /** 媒体 content 的 show_caption_above_media 透传（editMessageCaption 必填；缺失按 false） */
+  static showCaptionAboveOf(content: Record<string, Object> | null): boolean {
+    if (content === null) {
+      return false;
+    }
+    return content[TdField.SHOW_CAPTION_ABOVE_MEDIA] === true;
+  }
+
   /** MessageContent 对象（非 message）的单行预览：包装为 message 形状复用 previewTextOf */
   static previewOfContent(content: Record<string, Object> | null): string {
     if (content === null) {

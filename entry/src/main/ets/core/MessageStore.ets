@@ -872,6 +872,107 @@ export class MessageStore {
     TdClient.getInstance().send(request);
   }
 
+  /**
+   * 编辑已发文本消息（M6-3）：editMessageText —— 成功结果 message 经 updateMessageContent
+   * 消息刷新（1.8.63 editMessage* 的响应 message 不走 updateNewMessage；编辑内容更新由
+   * updateMessageContent 驱动，本方法不重复入库，仅透传错误给调用方 toast）。
+   * 返回 Promise<null>：成功 resolve；失败 reject(TDLib error.message)。
+   */
+  editMessageText(chatId: number, messageId: number, text: string): Promise<void> {
+    const trimmed: string = text.trim();
+    if (chatId === 0 || messageId === 0 || trimmed.length === 0 || !this.started) {
+      return Promise.resolve();
+    }
+    this.actionSeq += 1;
+    const extra: string = `editMessageText_${this.actionSeq}`;
+    const promise: Promise<void> = this.waitRequestResult(extra, `editMessageText: chat=${`${chatId}`} id=${`${messageId}`}`);
+    const formatted: Record<string, Object> = { ['@type']: TdInputMessage.FORMATTED_TEXT, 'text': trimmed };
+    const inputContent: Record<string, Object> = {
+      ['@type']: TdInputMessage.INPUT_MESSAGE_TEXT,
+      'text': formatted
+    };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.EDIT_MESSAGE_TEXT,
+      'chat_id': chatId,
+      'message_id': messageId,
+      'input_message_content': inputContent
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    return promise;
+  }
+
+  /**
+   * 编辑媒体消息 caption（M6-3）：showAbove 从原消息 content 透传
+   * （editMessageCaption 必填字段，漏传会把原上方 caption 强制移回媒体下方）。
+   */
+  editMessageCaption(chatId: number, messageId: number, caption: string, showAbove: boolean): Promise<void> {
+    if (chatId === 0 || messageId === 0 || !this.started) {
+      return Promise.resolve();
+    }
+    this.actionSeq += 1;
+    const extra: string = `editMessageCaption_${this.actionSeq}`;
+    const promise: Promise<void> = this.waitRequestResult(extra, `editMessageCaption: chat=${`${chatId}`} id=${`${messageId}`}`);
+    const formatted: Record<string, Object> = { ['@type']: TdInputMessage.FORMATTED_TEXT, 'text': caption.trim() };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.EDIT_MESSAGE_CAPTION,
+      'chat_id': chatId,
+      'message_id': messageId,
+      'caption': formatted,
+      'show_caption_above_media': showAbove
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    return promise;
+  }
+
+  /**
+   * 转发消息（M6-3）：send_copy=false 保留来源（「转发的消息」标签由 forward_info 驱动）、
+   * remove_caption=false 保留 caption；topic_id/options 可空缺省。
+   */
+  forwardMessages(toChatId: number, fromChatId: number, messageIds: Array<number>): void {
+    if (toChatId === 0 || fromChatId === 0 || messageIds.length === 0 || !this.started) {
+      return;
+    }
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.FORWARD_MESSAGES,
+      'chat_id': toChatId,
+      'from_chat_id': fromChatId,
+      'message_ids': messageIds,
+      'send_copy': false,
+      'remove_caption': false
+    };
+    TdClient.getInstance().send(request);
+    hilog.info(LOG_DOMAIN, TAG, 'forwardMessages: to=%{public}s from=%{public}s count=%{public}d',
+      `${toChatId}`, `${fromChatId}`, messageIds.length);
+  }
+
+  /**
+   * @extra 请求结果 → Promise<void>：error 响应 reject(error.message)、正常响应 resolve；
+   * 超时 reject('超时')。日志仅记动作与 id（不落内容）。
+   */
+  private waitRequestResult(extra: string, logLabel: string): Promise<void> {
+    return new Promise<void>((resolve: () => void, reject: (reason: string) => void): void => {
+      TdUpdateRouter.getInstance().waitForExtra(extra, SEND_TIMEOUT_MS)
+        .then((update: Record<string, Object>): void => {
+          const typeObj: Object | undefined = update[TdField.TYPE];
+          const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+          if (type === ErrorType.INVALID) {
+            const msgObj: Object | undefined = update[TdField.MESSAGE];
+            const msg: string = typeof msgObj === 'string' ? msgObj : '操作失败';
+            hilog.warn(LOG_DOMAIN, TAG, '%{public}s rejected', logLabel);
+            reject(msg);
+            return;
+          }
+          hilog.info(LOG_DOMAIN, TAG, '%{public}s ok', logLabel);
+          resolve();
+        })
+        .catch((reason: string): void => {
+          reject('操作超时');
+        });
+    });
+  }
+
   /** 失败重试：删除失败占位（本地 + TDLib）后按原文重发 */
   retrySend(chatId: number, messageId: number): void {    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
     if (cache === undefined) {
