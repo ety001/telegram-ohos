@@ -35,6 +35,9 @@ todos:
   - id: m5-polish
     content: M5 精选打磨（富文本 entities 渲染 + 会话操作菜单置顶/静音/删除 + 遗留 LOW 修复 + 版本 0.2.0；PR #11 已 merge；延后登记：LazyForEach 迁移/emoji 自绘面板/主题切换/URL 指纹窄边界/首屏超时重试——均无真机性能数据前不猜优化）
     status: completed
+  - id: m6-feature-parity
+    content: M6 对照 Telegram Desktop 差距补齐（8 PR：输入区 TextArea+本地草稿/消息上下文菜单+回复复制删除/编辑转发/头像在线状态服务端搜索/会话内搜索跳转/语音音频播放/贴纸 GIF/设置页，版本 0.3.0；PR #13–#20 已 merge，每 PR 经独立审计轮修复后 squash；真机验证清单见下）
+    status: completed
 ---
 
 # telegram-ohos 鸿蒙原生 Telegram 客户端开发计划
@@ -187,3 +190,22 @@ todos:
 - TDLib 版本锁定策略 + 补丁集版本化管理（patches/ 目录）。
 - 重签流水线脚本化：`scripts/renew-signing.sh`（到期提醒走 cron）。
 - 每次发版打 tag（`v0.x.y`），保留可回退 HAP。
+
+## 9. M6 真机验证挂账清单（2026-11-13，对照 Telegram Desktop 差距批次）
+
+> 计划与审计档案：`~/workspace/agent-share/tmp/telegram-ohos-m6-gap-plan.md`（含 TDLib 1.8.63 schema 审计记录）。
+
+| # | 验证项 | PR | 风险点 |
+|---|---|---|---|
+| 1 | TextArea Ctrl+Enter 发送（KeyEvent.getModifierKeyState 可达性）；Enter 换行 | #13 | onKeyEvent 对 TextArea 焦点事件可达性未实测 |
+| 2 | 本地草稿切会话保存/恢复 + 列表红「草稿」前缀；云端草稿灰前缀（他端写入） | #13 | clear_draft 清云端实测 |
+| 3 | 气泡右键/长按菜单双入口（PC 鼠标 + 触屏）；回复引用条（同会话缓存命中/未命中补拉两路径）；跳转滚动居中+高亮 | #14 | getMessage 补拉时序 |
+| 4 | 编辑（48h 窗口内自己消息）气泡刷新 + 「已编辑」标记（updateMessageEdited 即时性）；转发目标选择 + 「转发的消息」标签 | #15 | 可空字段省略（reply_markup/topic_id/options）真机确认 |
+| 5 | 头像三级渐进（真图/mini/首字母）；私聊在线绿点出现消失；服务端搜索命中未加载会话并可进入 | #16 | ChatAvatar 行复用（LazyForEach 全量 reload 约定） |
+| 6 | 会话内搜索结果面板 + 点击跳转（未加载消息上下文窗口 offset=-15） | #17 | getChatHistory 负 offset 窗口语义实测 |
+| 7 | 语音波形渲染/播放/倍速（1.0/1.25/2.0）/互斥/未听蓝点消失；音频文件播放 | #18 | timeUpdate 事件频率；webp→Image OK |
+| 8 | webp 贴纸直渲；GIF 下载完成自动播放（Image 原生 GIF 解码）；tgs/webm 静态角标不空白 | #19 | GIF 自动播放与解码 |
+| 9 | 设置页通知预览开关即时生效（「你有一条新消息」文案）；登出二次确认流转 | #20 | previewPromise 时序 |
+| 10 | 整包回归：登录→收发（文本/图片/文件/语音）→通知→保活（沿 M3–M5 挂账合并验证） | — | — |
+
+M7 候选（计划 §2 P1 项，未排期）：主题 token 化与深浅色切换（M7-1）、动画贴纸（tgs 需 lottie 依赖评估 / webm 需 VP9 验证）、消息 pin、相册聚合（media_album_id）、归档会话/文件夹、QR 登录、emoji 面板/@补全、视频播放器 seek/倍速、图片查看器多图、多账号、语音录制发送（需麦克风权限）、数据存储统计与清理、编辑可用性 getMessageProperties 精确判定、草稿跨重启持久化。
