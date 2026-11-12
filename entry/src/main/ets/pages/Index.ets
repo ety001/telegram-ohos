@@ -97,6 +97,8 @@ struct Index {
    @State searchText: string = '';
   /** 服务端搜索防抖句柄（M6-4） */
   private serverSearchTimer: number = -1;
+  /** 聊天区搜索条开关（M6-5，@Link 传入 ChatPanel） */
+  @State chatSearchOpen: boolean = false;
   @State visibleCount: number = 0;
   @State selectedChatId: number = 0;
   @State selectedChatTitle: string = '';
@@ -706,6 +708,14 @@ struct Index {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
+          Text('🔍')
+            .fontSize(18)
+            .width(32)
+            .height(32)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => {
+              this.chatSearchOpen = !this.chatSearchOpen;
+            })
         }
         .width('100%')
         .height(52)
@@ -713,7 +723,7 @@ struct Index {
         .alignItems(VerticalAlign.Center)
         .backgroundColor(ChatUi.LIST_BG)
 
-        ChatPanel({ chatId: this.selectedChatId })
+        ChatPanel({ chatId: this.selectedChatId, showSearch: $chatSearchOpen })
       } else {
         Column() {
           Blank()

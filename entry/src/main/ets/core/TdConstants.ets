@@ -65,6 +65,10 @@ export class TdReq {
   static readonly SEARCH_CHATS: string = 'searchChats';
   // 1.8.63 schema：getUser(user_id:int53) = User
   static readonly GET_USER: string = 'getUser';
+  // 会话内搜索（M6-5）
+  // 1.8.63 schema：searchChatMessages(chat_id, topic_id:MessageTopic 可空, query, sender_id:MessageSender
+  // 可空, from_message_id, offset, limit, filter:SearchMessagesFilter) = FoundChatMessages
+  static readonly SEARCH_CHAT_MESSAGES: string = 'searchChatMessages';
 }
 
 export class TdUpdate {
@@ -191,6 +195,9 @@ export class TdType {
   static readonly CHAT_TYPE_PRIVATE: string = 'chatTypePrivate';
   static readonly USER_STATUS_ONLINE: string = 'userStatusOnline';
   static readonly USER_STATUS_OFFLINE: string = 'userStatusOffline';
+  // 会话内搜索（M6-5；foundChatMessages 结果对象 / 过滤器空集）
+  static readonly FOUND_CHAT_MESSAGES: string = 'foundChatMessages';
+  static readonly SEARCH_MESSAGES_FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
 }
 
 /**
