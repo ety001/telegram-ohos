@@ -79,6 +79,9 @@ export class TdUpdate {
   static readonly CHAT_READ_OUTBOX: string = 'updateChatReadOutbox';
   // getChatHistory 的结果对象（@type=messages，含完整 message 数组；与 update 走同一分发入口）
   static readonly MESSAGES: string = 'messages';
+  // 云端草稿变更（M6-1；1.8.63 schema：{ chat_id, draft_message:draftMessage, positions }——
+  // 客户端无写草稿 API（saveDraft 已移除），仅其他端同步来的草稿经此更新；本地草稿走 DraftStore）
+  static readonly CHAT_DRAFT_MESSAGE: string = 'updateChatDraftMessage';
   // 媒体下载进度/完成通知（updateFile.file：含 local.path / is_downloading_* / downloaded_size）
   static readonly UPDATE_FILE: string = 'updateFile';
 }
@@ -227,6 +230,12 @@ export class TdField {
   // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
   static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';
   static readonly MUTE_FOR: string = 'mute_for';
+  // 云端草稿（M6-1；chat.draft_message:draftMessage，draft_message 可为 null；行预览提取
+  // draft_message.input_message_text.text——1.8.63 schema 字段名即 input_message_text）
+  static readonly DRAFT_MESSAGE: string = 'draft_message';
+  // draftMessage 内容字段名（1.8.63：input_message_text:InputMessageContent，注意与
+  // sendMessage 入参字段 input_message_content 是两个不同字段名）
+  static readonly DRAFT_INPUT_CONTENT: string = 'input_message_text';
   // setChatNotificationSettings 入参：置 false 才能按会话粒度覆盖 mute_for（M5 会话菜单）
   static readonly USE_DEFAULT_MUTE_FOR: string = 'use_default_mute_for';
   // 媒体内容与文件（M3-media；字段名以 1.8.63 td_api.tl 为准）

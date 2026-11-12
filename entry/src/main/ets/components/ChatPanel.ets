@@ -28,8 +28,11 @@ import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBub
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo } from '../core/MessageContent';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
+import { DraftStore } from '../core/DraftStore';
+import { AuthService, AppAuthState } from '../core/AuthService';
 import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { KeyCode } from '@kit.InputKit';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 import { fileUri } from '@kit.CoreFileKit';
 
@@ -68,6 +71,17 @@ export struct ChatPanel {
   /** 已 activate 的会话 id（@Watch 换会话时先 deactivate，@Watch 回调不提供旧值故自记） */
   private activatedChatId: number = 0;
   private firstVisibleIndex: number = 0;
+  /**
+   * 受控 TextArea 回声守卫（PR13 审计 P1-2）：程序化改写 inputText（发送清空/切会话恢复）后，
+   * IME 组合态可能携旧值再触发一次 onChange 回填。改写前把「即将被替换的旧文本」记入守卫字段，
+   * onChange 命中同值即判回声丢弃（一次性，命中即清）。新输入产生不同值不受影响。
+   */
+  private inputEchoGuard: string = '';
+
+  private applyProgrammaticInput(text: string): void {
+    this.inputEchoGuard = this.inputText;
+    this.inputText = text;
+  }
   /** 首屏定位标记：首次数据到达前不做锚定/跟底 */
   private positioned: boolean = false;
   private readonly storeObserver: MessageStoreObserver = (chatId: number): void => {
@@ -84,6 +98,12 @@ export struct ChatPanel {
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
     if (this.activatedChatId !== 0) {
+      // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）。
+      // PR13 审计 P1-1：登出流程 reset 先行、组件后拆卸——此时登录态已离开 ready，
+      // 残留 inputText 若回写会把跨账号内容塞进已清空的草稿仓，故按登录态守卫跳过
+      if (AuthService.getInstance().getAuthState() === AppAuthState.READY) {
+        DraftStore.getInstance().save(this.activatedChatId, this.inputText);
+      }
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
       // 通知触发规则接线：组件销毁后该会话不再视为「用户正在看」（新消息恢复通知）。
       // 直接清 0（而非尝试恢复某个「上一会话」）的前提：Index 通知路由已做 sm 栈归一化
@@ -105,6 +125,8 @@ export struct ChatPanel {
       return;
     }
     if (this.activatedChatId !== 0) {
+      // 切走前保存旧会话输入为本地草稿（M6-1；空文本等价清除）
+      DraftStore.getInstance().save(this.activatedChatId, this.inputText);
       MessageStore.getInstance().deactivateChat(this.activatedChatId);
     }
     this.activatedChatId = this.chatId;
@@ -113,6 +135,8 @@ export struct ChatPanel {
     NotificationService.getInstance().setActiveChat(this.chatId);
     this.positioned = false;
     this.entries = [];
+    // 恢复新会话本地草稿（M6-1；无草稿为空串）。守卫旧文本防 IME 回声（PR13 审计 P1-2）
+    this.applyProgrammaticInput(DraftStore.getInstance().restore(this.chatId));
     if (this.chatId !== 0) {
       MessageStore.getInstance().activateChat(this.chatId);
       this.rebuild();
@@ -271,55 +295,91 @@ export struct ChatPanel {
     .padding({ top: 8, bottom: 4 })
   }
 
-  /** 输入区：附件按钮 + TextInput + 发送按钮（回车/按钮双入口） */
+  /**
+   * 输入区（M6-1 重构）：附件菜单（图片/文件）+ TextArea 多行 + 发送按钮。
+   * - TextArea：Enter=换行（ArkUI 无法拦截默认换行插入），桌面 Ctrl+Enter=发送
+   *   （KeyEvent.getModifierKeyState 判定，since 12），移动端走发送按钮；
+   * - 附件 📎 bindMenu 两项：图片（PhotoViewPicker）/ 文件（DocumentViewPicker）；
+   * - 草稿：切会话/销毁由 switchChat/aboutToDisappear 保存，发送成功即清（DraftStore）。
+   */
   @Builder
   inputBar() {
-    Row({ space: 8 }) {
-      // 附件按钮（📎）
-      Text('📎')
-        .fontSize(22)
-        .width(40)
-        .height(40)
-        .textAlign(TextAlign.Center)
-        .onClick(() => this.pickAttachment())
-      TextInput({ text: this.inputText, placeholder: '输入消息' })
-        .layoutWeight(1)
-        .height(40)
-        .borderRadius(20)
-        .backgroundColor(ChatUi.INPUT_BG)
-        .fontColor(ChatUi.TEXT_PRIMARY)
-        .fontSize(15)
-        .placeholderColor(ChatUi.TEXT_SECONDARY)
-        .placeholderFont({ size: 14 })
-        .padding({ left: 14, right: 14 })
-        .enterKeyType(EnterKeyType.Send)
-        .onChange((value: string): void => {
-          this.inputText = value;
-        })
-        .onSubmit((enterKey: EnterKeyType, event: SubmitEvent): void => {
-          // 聊天连续输入：回车发送后保持输入框可编辑状态（键盘不收起；本 SDK 用 keepEditableState）
-          event.keepEditableState();
-          this.sendCurrent();
-        })
-      Text('发送')
-        .fontSize(15)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#FFFFFF')
-        .height(36)
-        .borderRadius(18)
-        .padding({ left: 16, right: 16 })
-        .textAlign(TextAlign.Center)
-        .backgroundColor(ChatUi.ACCENT)
-        .opacity(this.inputText.trim().length > 0 ? 1 : 0.4)
-        .onClick((): void => {
-          this.sendCurrent();
-        })
+    Column() {
+      Row({ space: 8 }) {
+        Text('📎')
+          .fontSize(22)
+          .width(40)
+          .height(40)
+          .textAlign(TextAlign.Center)
+          .bindMenu(this.attachMenu())
+        TextArea({ text: this.inputText, placeholder: '输入消息' })
+          .layoutWeight(1)
+          .constraintSize({ minHeight: 40, maxHeight: 120 })
+          .borderRadius(20)
+          .backgroundColor(ChatUi.INPUT_BG)
+          .fontColor(ChatUi.TEXT_PRIMARY)
+          .fontSize(15)
+          .placeholderColor(ChatUi.TEXT_SECONDARY)
+          .placeholderFont({ size: 14 })
+          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+          .maxLines(5)
+          .textOverflow(TextOverflow.Ellipsis)
+          .onChange((value: string): void => {
+            // 回声守卫：程序化改写后的第一次 onChange 携旧值（IME 组合态回流）→ 丢弃
+            if (this.inputEchoGuard.length > 0 && value === this.inputEchoGuard) {
+              this.inputEchoGuard = '';
+              return;
+            }
+            this.inputEchoGuard = '';
+            this.inputText = value;
+          })
+          .onKeyEvent((event: KeyEvent): void => {
+            // Ctrl+Enter 发送（桌面键盘；Enter 本身换行不拦截）
+            if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ENTER &&
+              event.getModifierKeyState?.(['Ctrl']) === true) {
+              this.sendCurrent();
+            }
+          })
+        Text('发送')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#FFFFFF')
+          .height(36)
+          .borderRadius(18)
+          .padding({ left: 16, right: 16 })
+          .textAlign(TextAlign.Center)
+          .backgroundColor(ChatUi.ACCENT)
+          .opacity(this.inputText.trim().length > 0 ? 1 : 0.4)
+          .onClick((): void => {
+            this.sendCurrent();
+          })
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 60, maxHeight: 140 })
+      .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .height(60)
-    .padding({ left: 12, right: 12 })
-    .alignItems(VerticalAlign.Center)
     .backgroundColor(ChatUi.LIST_BG)
+  }
+
+  /** 附件菜单（M6-1）：图片 / 文件 */
+  @Builder
+  attachMenu() {
+    Menu() {
+      MenuItem({ content: '图片' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.selectPhoto();
+        })
+      MenuItem({ content: '文件' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.selectDocument();
+        })
+    }
+    .backgroundColor(ChatUi.LIST_BG)
+    .radius(12)
   }
 
   // ---------------- 数据与滚动 ----------------
@@ -337,7 +397,10 @@ export struct ChatPanel {
       return;
     }
     MessageStore.getInstance().sendText(this.chatId, text);
-    this.inputText = '';
+    // 守卫旧文本防发送清空后的 IME 回声（PR13 审计 P1-2）
+    this.applyProgrammaticInput('');
+    // 发送成功即清本地草稿（云端草稿由 sendText 的 clear_draft 顺带清理）
+    DraftStore.getInstance().clear(this.chatId);
   }
 
   private retryMessage(messageId: number): void {
@@ -345,13 +408,6 @@ export struct ChatPanel {
       return;
     }
     MessageStore.getInstance().retrySend(this.chatId, messageId);
-  }
-
-  /** 附件选择入口：弹出选择器（图片/文件） */
-  private async pickAttachment(): Promise<void> {
-    // TODO: 使用 ActionSheet 或自定义弹窗让用户选择图片/文件
-    // 当前先直接打开图片选择器
-    this.selectPhoto();
   }
 
   /** 选择图片并发送 */

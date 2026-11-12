@@ -6,6 +6,7 @@ import { ChatListStore } from '../core/ChatListStore';
 import { TimeFormat } from '../core/TimeFormat';
 import { TdField } from '../core/TdConstants';
 import { MessageContent } from '../core/MessageContent';
+import { DraftStore } from '../core/DraftStore';
 
 /** 会话行视图模型：由 TDLib chat 对象按需投影（仅可见行构建，千级列表零全量构建开销） */
 export class ChatRowModel {
@@ -17,6 +18,10 @@ export class ChatRowModel {
   pinned: boolean = false;
   /** 免打扰中（notification_settings.mute_for > 0；行标记 + 未读角标置灰 + 菜单文案用） */
   muted: boolean = false;
+  /** 本地草稿文本（M6-1，DraftStore；非空时行预览显示红「草稿」前缀，优先级最高） */
+  draftLocal: string = '';
+  /** 云端草稿文本（M6-1，chat.draft_message；本地为空时显示灰「草稿」前缀） */
+  draftCloud: string = '';
 }
 
 export class ChatUi {
@@ -30,6 +35,8 @@ export class ChatUi {
   static readonly TEXT_SECONDARY: string = '#7D8E9E';
   static readonly ROW_PRESSED_BG: string = '#202B36';
   static readonly BADGE_BG: string = '#3390EC';
+  /** 本地草稿前缀色（Telegram 语义：未发送内容警示红） */
+  static readonly DRAFT_LOCAL: string = '#E17076';
   // 消息气泡（M3）：incoming 深灰 / outgoing 沿用 ACCENT 蓝
   static readonly BUBBLE_IN: string = '#242F3D';
   static readonly BUBBLE_OUT: string = '#3390EC';
@@ -85,7 +92,34 @@ export class ChatUi {
     }
     row.pinned = ChatListStore.getInstance().isPinned(row.chatId);
     row.muted = ChatListStore.getInstance().isMuted(row.chatId);
+    // 草稿（M6-1）：本地草稿优先（红前缀），其次云端草稿（灰前缀）；均无走 last_message 预览
+    row.draftLocal = DraftStore.getInstance().draftOf(row.chatId);
+    if (row.draftLocal.length === 0) {
+      row.draftCloud = ChatUi.cloudDraftText(chat);
+    }
     return row;
+  }
+
+  /**
+   * 云端草稿文本提取（M6-1）：chat.draft_message.input_message_text.text——
+   * 1.8.63 draftMessage 字段名即 input_message_text（类型 InputMessageContent，纯文本草稿
+   * 恒为 inputMessageText{text:formattedText{text}}）；draft_message 可为 null。
+   */
+  private static cloudDraftText(chat: Record<string, Object>): string {
+    const draft: Record<string, Object> | null = ChatUi.asRecord(chat[TdField.DRAFT_MESSAGE]);
+    if (draft === null) {
+      return '';
+    }
+    const inputContent: Record<string, Object> | null = ChatUi.asRecord(draft[TdField.DRAFT_INPUT_CONTENT]);
+    if (inputContent === null) {
+      return '';
+    }
+    const formatted: Record<string, Object> | null = ChatUi.asRecord(inputContent[TdField.TEXT]);
+    if (formatted === null) {
+      return '';
+    }
+    const text: Object | undefined = formatted[TdField.TEXT];
+    return typeof text === 'string' ? text : '';
   }
 
   /**

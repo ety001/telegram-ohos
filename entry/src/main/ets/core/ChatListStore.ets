@@ -107,6 +107,18 @@ export class ChatListStore {
     this.handleChatReadOutbox(update);
   };
 
+  // 云端草稿变更（M6-1）：写入 chat.draft_message（可 null）驱动行预览刷新；
+  // 本地草稿由 DraftStore 独立管理，行显示优先级在 ChatUi.buildRow 裁决
+  private readonly onChatDraftMessage: TdRouteHandler = (update: Record<string, Object>): void => {
+    const chatId: number = this.readNumber(update, TdField.CHAT_ID);
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return;
+    }
+    chat[TdField.DRAFT_MESSAGE] = update[TdField.DRAFT_MESSAGE];
+    this.notifyChanged();
+  };
+
   /**
    * 登录就绪后触发（幂等）：挂路由 + 拉首屏。
    * 极端时序（ready 与 start 之间恰好新产生会话导致 updateNewChat 先于注册到达）下
@@ -128,6 +140,7 @@ export class ChatListStore {
     router.register(TdUpdate.CHAT_PHOTO, this.onChatPhoto);
     router.register(TdUpdate.CHAT_NOTIFICATION_SETTINGS, this.onChatNotificationSettings);
     router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
+    router.register(TdUpdate.CHAT_DRAFT_MESSAGE, this.onChatDraftMessage);
     hilog.info(LOG_DOMAIN, TAG, 'start: request first page, limit=%{public}d', PAGE_SIZE);
     this.requestFirstPage();
   }
