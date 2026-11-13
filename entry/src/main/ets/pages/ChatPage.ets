@@ -11,6 +11,7 @@ import { router } from '@kit.ArkUI';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { ChatPanel } from '../components/ChatPanel';
 import { ChatUi } from './ChatUi';
+import { BackIcon, SearchIcon } from '../components/Icons';
 
 @Entry
 @Component
@@ -52,12 +53,9 @@ struct ChatPage {
     Column() {
       // 顶部栏：返回 + 会话名 + 搜索入口（M6-5）
       Row({ space: 12 }) {
-        Text('<')
-          .fontSize(24)
-          .fontColor(ChatUi.TEXT_PRIMARY)
+        BackIcon({ iconSize: 20, iconColor: ChatUi.TEXT_PRIMARY })
           .width(32)
           .height(32)
-          .textAlign(TextAlign.Center)
           .onClick((): void => {
             router.back();
           })
@@ -68,11 +66,9 @@ struct ChatPage {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
-        Text('🔍')
-          .fontSize(18)
+        SearchIcon({ iconSize: 18, iconColor: ChatUi.TEXT_PRIMARY })
           .width(32)
           .height(32)
-          .textAlign(TextAlign.Center)
           .onClick((): void => {
             this.showSearch = !this.showSearch;
           })

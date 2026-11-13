@@ -198,6 +198,9 @@ export class TdType {
   static readonly CHAT_TYPE_PRIVATE: string = 'chatTypePrivate';
   static readonly USER_STATUS_ONLINE: string = 'userStatusOnline';
   static readonly USER_STATUS_OFFLINE: string = 'userStatusOffline';
+  // 消息发送者（UI 打磨：message.sender_id:messageSenderUser{user_id}，群聊昵称/分组键）
+  static readonly MESSAGE_SENDER_USER: string = 'messageSenderUser';
+  static readonly MESSAGE_SENDER_CHAT: string = 'messageSenderChat';
   // 会话内搜索（M6-5；foundChatMessages 结果对象 / 过滤器空集）
   static readonly FOUND_CHAT_MESSAGES: string = 'foundChatMessages';
   static readonly SEARCH_MESSAGES_FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
@@ -271,8 +274,9 @@ export class TdField {
   // message / 消息请求通用字段（M3）
   static readonly MESSAGE_ID: string = 'message_id';
   static readonly MESSAGE_IDS: string = 'message_ids';
-  // 回复引用（M6-2；message.reply_to / messageReplyToMessage 字段）
+  // 回复引用（M6-2；message.reply_to / messageReplyToMessage 字段）+ 发送者（UI 打磨）
   static readonly REPLY_TO: string = 'reply_to';
+  static readonly SENDER_ID: string = 'sender_id';
   static readonly ORIGIN: string = 'origin';
   static readonly SENDER_NAME: string = 'sender_name';
   // 编辑与转发来源（M6-3；message.edit_date / message.forward_info:messageForwardInfo）

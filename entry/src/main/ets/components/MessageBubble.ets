@@ -28,6 +28,7 @@ import { MediaSaver, SaveResult } from '../core/MediaSaver';
 import { AudioPlayerController, AudioSnapshot, AudioState } from '../core/AudioPlayerController';
 import { MessageStore } from '../core/MessageStore';
 import { TdType } from '../core/TdConstants';
+import { PlayIcon, PauseIcon } from './Icons';
 
 /** 媒体气泡展示尺寸（vp） */
 const MEDIA_WIDTH: number = 240;
@@ -148,6 +149,23 @@ export class MessageBubbleModel {
   /** 是否转发消息（forward_info 存在；标签渲染门控，与名称可解析性解耦——PR15 审计 P1-2） */
   forwarded: boolean = false;
 
+  // ---------------- 消息分组与发送者（UI 打磨） ----------------
+  /** 与前一条同组（同发送者 + <10min）：顶部间距收紧、上侧圆角收小 */
+  groupedWithPrev: boolean = false;
+  /** 与后一条同组：时间行隐藏（组尾才显示时间+状态） */
+  groupedWithNext: boolean = false;
+  /** 发送者分组键（'me' / 私聊 'peer' / 群聊 sender id 字符串；分组与头像判定共用） */
+  senderKey: string = '';
+  /** 群聊发送者昵称（groupStart 且非 outgoing 时渲染；空串不渲染） */
+  senderName: string = '';
+  /** 群聊发送者着色（uid/标题 hash → 色板，头像底色与昵称同色） */
+  senderColor: string = '';
+  /** 群聊发送者首字母（字母头像；空串用 #） */
+  senderLetter: string = '';
+  /** 私聊会话头像 file id（incoming 组尾渲染会话头像；0 无头像） */
+  chatAvatarFileId: number = 0;
+  chatAvatarMini: string = '';
+
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
     // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）；
@@ -156,7 +174,8 @@ export class MessageBubbleModel {
     return `${this.messageId}_${this.sendState}_${this.isRead}_${this.text}_${this.errorText}` +
       `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
       `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
-      `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}_${this.stickerFileId}_${this.animFileId}`;
+      `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}_${this.stickerFileId}_${this.animFileId}` +
+      `_${this.groupedWithPrev}_${this.groupedWithNext}_${this.senderName}_${this.senderColor}`;
   }
 }
 
@@ -330,7 +349,21 @@ export struct MessageBubble {
         Blank()
           .layoutWeight(1)
       }
+      // incoming 侧发送者信息列（UI 打磨）：组尾头像（私聊=会话头像/群聊=首字母着色圆）
+      if (!this.model.isOutgoing) {
+        this.senderAvatar()
+      }
       Column() {
+        // 群聊发送者昵称（组首着色，仅非私聊 + incoming + 组首）
+        if (!this.model.isOutgoing && this.model.senderName.length > 0 && !this.model.groupedWithPrev) {
+          Text(this.model.senderName)
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.model.senderColor.length > 0 ? this.model.senderColor : ChatUi.TEXT_SECONDARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .padding({ left: 6, bottom: 2 })
+        }
         // 转发来源标签（M6-3）：forward_info 存在即显示（名称不可解析时仅「转发的消息」）
         if (this.model.forwarded) {
           Text(this.model.forwardFrom.length > 0 ? `转发的消息：${this.model.forwardFrom}` : '转发的消息')
@@ -362,6 +395,9 @@ export struct MessageBubble {
       // 外层不设 maxWidth（PR14 审计 P2-①）：Column 收敛到气泡宽度，引用条 width('100%')
       // 与气泡对齐；避免外层百分比与气泡自身 78% 嵌套把文本气泡压到 ~61% 行宽
       .borderRadius(13)
+      .alignItems(HorizontalAlign.Start)
+      // 分组间距（UI 打磨）：组内 2、跨组 10
+      .margin({ top: this.model.groupedWithPrev ? 1 : 10 })
       // 跳转高亮（M6-2/5）：短暂强调背景色（与气泡自身底色叠加由透明度保证可辨识）
       .backgroundColor(this.model.highlighted ? ChatUi.HIGHLIGHT_BG : Color.Transparent)
       if (!this.model.isOutgoing) {
@@ -370,14 +406,94 @@ export struct MessageBubble {
       }
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 2, bottom: 2 })
+    .padding({ left: 12, right: 12, top: 0, bottom: 0 })
     // 消息上下文菜单（M6-2）：长按（触屏/触控板）与右键（PC 鼠标）双入口，沿 Index 会话菜单模式
     .bindContextMenu(this.bubbleMenu(), ResponseType.LongPress)
     .bindContextMenu(this.bubbleMenu(), ResponseType.RightClick)
   }
 
-  /** 回复引用条：来源名 + 单行预览 + 左侧强调竖线；点击跳转源消息 */
+  /**
+   * incoming 侧头像（UI 打磨）：
+   * - 组尾（!groupedWithNext）才渲染 34vp 头像（Telegram 桌面版语义），组内其余占位 34vp 保持缩进；
+   * - 私聊：会话头像（chatAvatarFileId 下载 / mini / 首字母色环三级）；
+   * - 群聊：发送者首字母 + senderColor 着色圆（精确头像挂 M7 用户头像体系）。
+   * 头像自带 34vp 宽度，不与 Row space 叠加额外空隙。
+   */
   @Builder
+  senderAvatar() {
+    Column() {
+      Blank()
+        .layoutWeight(1)
+      if (!this.model.groupedWithNext) {
+        Stack() {
+          Circle({ width: 34, height: 34 })
+            .fill(this.model.senderColor.length > 0 ? this.model.senderColor : ChatUi.avatarColor(this.model.chatId))
+          if (this.senderAvatarSrc().length > 0) {
+            Image(this.senderAvatarSrc())
+              .width(34)
+              .height(34)
+              .borderRadius(17)
+              .clip(true)
+          } else {
+            Text(this.model.senderLetter.length > 0 ? this.model.senderLetter : '#')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#FFFFFF')
+          }
+        }
+        .width(34)
+        .height(34)
+      }
+    }
+    .width(34)
+    .constraintSize({ minHeight: 34 })
+  }
+
+  /** 私聊会话头像源：下载完成 file URI > minithumbnail（群聊返回空走字母圆） */
+  private senderAvatarSrc(): string {
+    if (this.model.chatAvatarFileId === 0) {
+      return '';
+    }
+    const store: FileDownloadStore = FileDownloadStore.getInstance();
+    if (store.isReady(this.model.chatAvatarFileId)) {
+      return store.getReadyUri(this.model.chatAvatarFileId);
+    }
+    return this.model.chatAvatarMini.length > 0 ? `data:image/jpeg;base64,${this.model.chatAvatarMini}` : '';
+  }
+
+  /**
+   * 组合圆角（UI 打磨）：基准 12；组内相邻侧收小到 4（贴近 Telegram 消息串联视觉）。
+   * incoming 收左上/左下，outgoing 收右上/右下。
+   */
+  private groupedRadius(): BorderRadiuses {
+    const r: number = 12;
+    const s: number = 4;
+    // incoming 收左上/左下，outgoing 收右上/右下（组内相邻侧 4；BorderRadiuses 为对象接口）
+    const tl: number = !this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
+    const tr: number = this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
+    const br: number = this.model.isOutgoing && this.model.groupedWithNext ? s : r;
+    const bl: number = !this.model.isOutgoing && this.model.groupedWithNext ? s : r;
+    const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl };
+    return radius;
+  }
+
+  /** outgoing 垂直渐变蓝（UI 打磨）；incoming 纯色（保持原观感，由发丝边提层次） */
+  private bubbleGradient(): LinearGradientOptions {
+    const stops: Array<[ResourceColor, number]> = this.model.isOutgoing
+      ? [['#4FA3F5', 0], ['#2E7BE6', 1]]
+      : [['#242F3D', 0], ['#242F3D', 1]];
+    return { angle: 180, colors: stops };
+  }
+
+  /** incoming 发丝描边（outgoing 无边框） */
+  private bubbleBorder(): BorderOptions {
+    if (this.model.isOutgoing) {
+      return { width: 0 };
+    }
+    return { width: 0.5, color: '#14FFFFFF' };
+  }
+
+  /** 回复引用条：来源名 + 单行预览 + 左侧强调竖线；点击跳转源消息 */  @Builder
   replyQuoteBar() {
     Row({ space: 6 }) {
       Column()
@@ -529,9 +645,7 @@ export struct MessageBubble {
             Stack({ alignContent: Alignment.Center }) {
               Circle({ width: 46, height: 46 })
                 .fill('#66000000')
-              Text('▶')
-                .fontSize(20)
-                .fontColor('#FFFFFF')
+              PlayIcon({ iconSize: 18, iconColor: '#FFFFFF' })
             }
             .width(46)
             .height(46)
@@ -606,9 +720,11 @@ export struct MessageBubble {
         Stack({ alignContent: Alignment.Center }) {
           Circle({ width: 38, height: 38 })
             .fill(this.model.isOutgoing ? '#4DFFFFFF' : ChatUi.SEARCH_BG)
-          Text(this.voicePlaying ? '❚❚' : '▶')
-            .fontSize(this.voicePlaying ? 12 : 16)
-            .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.ACCENT)
+          if (this.voicePlaying) {
+            PauseIcon({ iconSize: 13, iconColor: this.model.isOutgoing ? '#FFFFFF' : ChatUi.ACCENT })
+          } else {
+            PlayIcon({ iconSize: 14, iconColor: this.model.isOutgoing ? '#FFFFFF' : ChatUi.ACCENT })
+          }
         }
         .width(38)
         .height(38)
@@ -691,7 +807,8 @@ export struct MessageBubble {
           })
       }
 
-      Row({ space: 4 }) {
+      if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
+        Row({ space: 4 }) {
         if (this.model.sendState === BubbleSendState.FAILED) {
           Text(this.model.errorText.length > 0 ? this.model.errorText : '发送失败')
             .fontSize(10)
@@ -713,11 +830,16 @@ export struct MessageBubble {
       .width('100%')
       .justifyContent(FlexAlign.End)
       .alignItems(VerticalAlign.Center)
+      }
     }
     .constraintSize({ maxWidth: '78%' })
     .padding({ left: 11, right: 11, top: 7, bottom: 7 })
-    .borderRadius(12)
+    .borderRadius(this.groupedRadius())
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
+    // UI 打磨：outgoing 垂直渐变蓝（覆盖底色）；incoming 发丝描边提层次
+    .linearGradient(this.bubbleGradient())
+    .border(this.bubbleBorder())
+    .shadow({ radius: 8, color: '#3D000000', offsetX: 0, offsetY: 2 })
   }
 
   /** 播放目标 key（chatId:messageId；AudioPlayerController 互斥匹配用） */
@@ -1017,9 +1139,7 @@ export struct MessageBubble {
         Stack({ alignContent: Alignment.Center }) {
           Circle({ width: 42, height: 42 })
             .fill('#66000000')
-          Text('▶')
-            .fontSize(18)
-            .fontColor('#FFFFFF')
+          PlayIcon({ iconSize: 16, iconColor: '#FFFFFF' })
         }
         .width(42)
         .height(42)
@@ -1147,7 +1267,8 @@ export struct MessageBubble {
         .margin({ top: 4 })
       }
 
-      Row({ space: 4 }) {
+      if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
+        Row({ space: 4 }) {
         if (this.model.sendState === BubbleSendState.FAILED) {
           Text(this.model.errorText.length > 0 ? this.model.errorText : '发送失败')
             .fontSize(10)
@@ -1170,11 +1291,16 @@ export struct MessageBubble {
       .justifyContent(FlexAlign.End)
       .alignItems(VerticalAlign.Center)
       .margin({ top: 2 })
+      }
     }
     .constraintSize({ maxWidth: '78%' })
     .padding({ left: 11, right: 11, top: 7, bottom: 7 })
-    .borderRadius(12)
+    .borderRadius(this.groupedRadius())
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
+    // UI 打磨：outgoing 垂直渐变蓝（覆盖底色）；incoming 发丝描边提层次
+    .linearGradient(this.bubbleGradient())
+    .border(this.bubbleBorder())
+    .shadow({ radius: 8, color: '#3D000000', offsetX: 0, offsetY: 2 })
     .onClick((): void => {
       if (this.consumeLinkClick()) {
         return; // 链接切片点击已消费（见 linkClickConsumed 注释）
@@ -1196,7 +1322,8 @@ export struct MessageBubble {
           .fontSize(13)
           .fontColor(this.model.isOutgoing ? '#DCE9F7' : ChatUi.TEXT_SECONDARY)
       }
-      Row({ space: 4 }) {
+      if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
+        Row({ space: 4 }) {
         if (this.model.sendState === BubbleSendState.FAILED) {
           Text(this.model.errorText.length > 0 ? this.model.errorText : '发送失败')
             .fontSize(10)
@@ -1219,11 +1346,16 @@ export struct MessageBubble {
       .justifyContent(FlexAlign.End)
       .alignItems(VerticalAlign.Center)
       .margin({ top: 2 })
+      }
     }
     .constraintSize({ maxWidth: '78%' })
     .padding({ left: 11, right: 11, top: 7, bottom: 7 })
-    .borderRadius(12)
+    .borderRadius(this.groupedRadius())
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
+    // UI 打磨：outgoing 垂直渐变蓝（覆盖底色）；incoming 发丝描边提层次
+    .linearGradient(this.bubbleGradient())
+    .border(this.bubbleBorder())
+    .shadow({ radius: 8, color: '#3D000000', offsetX: 0, offsetY: 2 })
     .onClick((): void => {
       if (this.consumeLinkClick()) {
         return; // 链接切片点击已消费（见 linkClickConsumed 注释）
