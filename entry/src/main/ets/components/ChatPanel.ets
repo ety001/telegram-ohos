@@ -667,6 +667,10 @@ export struct ChatPanel {
             }
             this.inputEchoGuard = '';
             this.inputText = value;
+            // 官方行为：开始输入即收起面板（PR24 审计 P2-①）
+            if (this.panelKind !== PanelKind.NONE && value.length > 0) {
+              this.panelKind = PanelKind.NONE;
+            }
           })
           .onKeyEvent((event: KeyEvent): void => {
             // Ctrl+Enter 发送（桌面键盘；Enter 本身换行不拦截）

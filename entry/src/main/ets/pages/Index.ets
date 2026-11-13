@@ -180,6 +180,8 @@ struct Index {
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
       this.chatStatusLine = '';
+      this.chatPanelKind = '';
+      this.chatSearchOpen = false;
     }
   }
 
