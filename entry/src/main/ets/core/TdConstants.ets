@@ -299,6 +299,8 @@ export class TdField {
   static readonly FIRST_NAME: string = 'first_name';
   static readonly LAST_NAME: string = 'last_name';
   static readonly EXPIRES: string = 'expires';
+  // userStatusOffline.was_online:int32（最后在线时间；注意与 Online.expires 字段名不同）
+  static readonly WAS_ONLINE: string = 'was_online';
   static readonly NEW_CONTENT: string = 'new_content';
   static readonly OLD_MESSAGE_ID: string = 'old_message_id';
   static readonly SENDING_STATE: string = 'sending_state';

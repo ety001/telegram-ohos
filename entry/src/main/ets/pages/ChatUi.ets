@@ -65,6 +65,14 @@ export class ChatUi {
   // 在线状态文字/绿点（windowActiveTextFg #6ab3f3 语义；绿点沿用系统绿系）
   static readonly ONLINE_FG: string = '#6AB3F3';
   static readonly ONLINE_DOT: string = '#85DE85'; // peer2 NameFg 绿
+  // 会话列表行细分色（dialogs palette：dialogsTextFg/dialogsDateFg/dialogsTextFgService）
+  static readonly LIST_PREVIEW: string = '#7F91A4';
+  static readonly LIST_TIME: string = '#8696A8';
+  static readonly LIST_SERVICE: string = '#73B9F5';
+  // 顶栏状态行（historyStatusFg=windowSubTextFg / typing online=windowActiveTextFg）
+  static readonly STATUS_FG: string = '#708499';
+  // 回复/置顶条底（historyPinnedBg）
+  static readonly PINNED_BG: string = '#1B2734';
 
   /**
    * 群聊发送者昵称色板（historyPeer1..8NameFg，Night palette:218-239；

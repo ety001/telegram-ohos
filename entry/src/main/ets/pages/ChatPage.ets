@@ -9,6 +9,7 @@
  */
 import { router } from '@kit.ArkUI';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
+import { UserStore } from '../core/UserStore';
 import { ChatPanel } from '../components/ChatPanel';
 import { ChatUi } from './ChatUi';
 import { BackIcon, SearchIcon } from '../components/Icons';
@@ -20,6 +21,11 @@ struct ChatPage {
   @State chatTitle: string = '';
   /** 会话内搜索开关（M6-5，@Link 传入 ChatPanel） */
   @State showSearch: boolean = false;
+  /** 顶栏状态行（UI 打磨：私聊 在线/最后见于…，官方 historyStatusFg 语义） */
+  @State statusLine: string = '';
+  private readonly userObserver: () => void = (): void => {
+    this.refreshStatus();
+  };
   private readonly storeObserver: ChatListObserver = (): void => {
     this.refreshTitle();
   };
@@ -34,11 +40,14 @@ struct ChatPage {
       }
     }
     this.refreshTitle();
+    this.refreshStatus();
     ChatListStore.getInstance().addObserver(this.storeObserver);
+    UserStore.getInstance().addObserver(this.userObserver);
   }
 
   aboutToDisappear(): void {
     ChatListStore.getInstance().removeObserver(this.storeObserver);
+    UserStore.getInstance().removeObserver(this.userObserver);
   }
 
   private refreshTitle(): void {
@@ -47,6 +56,17 @@ struct ChatPage {
     }
     const title: string = ChatListStore.getInstance().getTitle(this.chatId);
     this.chatTitle = title.length > 0 ? title : '会话';
+  }
+
+  /** 状态行：仅私聊显示（在线/最后见于…）；群聊/频道不显示 */
+  private refreshStatus(): void {
+    const userId: number = ChatListStore.getInstance().privateUserIdOf(this.chatId);
+    if (userId === 0) {
+      this.statusLine = '';
+      return;
+    }
+    const text: string | null = UserStore.getInstance().statusText(userId);
+    this.statusLine = text === null ? '' : text;
   }
 
   build() {
@@ -59,13 +79,22 @@ struct ChatPage {
           .onClick((): void => {
             router.back();
           })
-        Text(this.chatTitle)
-          .fontSize(17)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(ChatUi.TEXT_PRIMARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
+        Column({ space: 1 }) {
+          Text(this.chatTitle)
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ChatUi.TEXT_PRIMARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.statusLine.length > 0) {
+            Text(this.statusLine)
+              .fontSize(12)
+              .fontColor(this.statusLine === '在线' ? ChatUi.ONLINE_FG : ChatUi.STATUS_FG)
+              .maxLines(1)
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
         SearchIcon({ iconSize: 18, iconColor: ChatUi.TEXT_PRIMARY })
           .width(32)
           .height(32)

@@ -24,6 +24,7 @@ import { MessageStore } from '../core/MessageStore';
 import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService, ChatRouteObserver } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
+import { UserStore } from '../core/UserStore';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
@@ -99,6 +100,11 @@ struct Index {
   private serverSearchTimer: number = -1;
   /** 聊天区搜索条开关（M6-5，@Link 传入 ChatPanel） */
   @State chatSearchOpen: boolean = false;
+  /** 聊天区顶栏状态行（UI 打磨：私聊 在线/最后见于…） */
+  @State chatStatusLine: string = '';
+  private readonly chatUserObserver: () => void = (): void => {
+    this.refreshChatStatus();
+  };
   @State visibleCount: number = 0;
   @State selectedChatId: number = 0;
   @State selectedChatTitle: string = '';
@@ -134,6 +140,7 @@ struct Index {
     AuthService.getInstance().onAuthState(this.authObserver);
     BreakpointTool.getInstance().addObserver(this.breakpointObserver);
     ChatListStore.getInstance().addObserver(this.listObserver);
+    UserStore.getInstance().addObserver(this.chatUserObserver);
     NotificationService.getInstance().addChatRouteObserver(this.notificationChatObserver);
     this.refreshVisibleCount();
     // 冷启动点击通知：EntryAbility.onCreate 已暂存 chatId；此时通常未登录（applyPending 内
@@ -143,6 +150,7 @@ struct Index {
 
   aboutToDisappear(): void {
     AuthService.getInstance().offAuthState(this.authObserver);
+    UserStore.getInstance().removeObserver(this.chatUserObserver);
     BreakpointTool.getInstance().removeObserver(this.breakpointObserver);
     ChatListStore.getInstance().removeObserver(this.listObserver);
     NotificationService.getInstance().removeChatRouteObserver(this.notificationChatObserver);
@@ -169,7 +177,19 @@ struct Index {
       DraftStore.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
+      this.chatStatusLine = '';
     }
+  }
+
+  /** 聊天区顶栏状态行（私聊 在线/最后见于…） */
+  private refreshChatStatus(): void {
+    const userId: number = ChatListStore.getInstance().privateUserIdOf(this.selectedChatId);
+    if (userId === 0) {
+      this.chatStatusLine = '';
+      return;
+    }
+    const text: string | null = UserStore.getInstance().statusText(userId);
+    this.chatStatusLine = text === null ? '' : text;
   }
 
   private refreshVisibleCount(): void {
@@ -179,6 +199,7 @@ struct Index {
       if (!ChatListStore.getInstance().getOrderedIds().includes(this.selectedChatId)) {
         this.selectedChatId = 0;
         this.selectedChatTitle = '';
+        this.chatStatusLine = '';
         return;
       }
       const title: string = ChatListStore.getInstance().getTitle(this.selectedChatId);
@@ -310,6 +331,7 @@ struct Index {
     // md/lg：右侧聊天区内嵌 ChatPanel（消息流 + 输入区，与 sm ChatPage 复用同一组件）
     this.selectedChatId = row.chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(row.chatId);
+    this.refreshChatStatus();
   }
 
   /**
@@ -348,6 +370,7 @@ struct Index {
     }
     this.selectedChatId = chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(chatId);
+    this.refreshChatStatus();
   }
 
   /**
@@ -561,7 +584,7 @@ struct Index {
             .layoutWeight(1)
           Text(item.timeText)
             .fontSize(11)
-            .fontColor(ChatUi.TEXT_SECONDARY)
+            .fontColor(ChatUi.LIST_TIME) // dialogsDateFg
             .margin({ left: 8 })
         }
         .width('100%')
@@ -592,7 +615,7 @@ struct Index {
           } else {
             Text(item.preview)
               .fontSize(13)
-              .fontColor(ChatUi.TEXT_SECONDARY)
+              .fontColor(ChatUi.LIST_PREVIEW) // dialogsTextFg
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .layoutWeight(1)
@@ -695,13 +718,22 @@ struct Index {
     Column() {
       if (this.selectedChatId !== 0) {
         Row() {
-          Text(this.selectedChatTitle)
-            .fontSize(17)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(ChatUi.TEXT_PRIMARY)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
+          Column({ space: 1 }) {
+            Text(this.selectedChatTitle)
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(ChatUi.TEXT_PRIMARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (this.chatStatusLine.length > 0) {
+              Text(this.chatStatusLine)
+                .fontSize(12)
+                .fontColor(this.chatStatusLine === '在线' ? ChatUi.ONLINE_FG : ChatUi.STATUS_FG)
+                .maxLines(1)
+            }
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
           SearchIcon({ iconSize: 18, iconColor: ChatUi.TEXT_PRIMARY })
             .width(32)
             .height(32)
