@@ -146,6 +146,66 @@ export class UserStore {
     return expires === 0 || expires > Math.floor(Date.now() / 1000);
   }
 
+  /**
+   * 私聊状态行文案（顶栏用；官方语义：在线=windowActiveTextFg，其余=historyStatusFg）。
+   * 返回 null = 无状态可显示（未拉到用户/非在线类状态缺时间）。
+   */
+  statusText(userId: number): string | null {
+    const user: Record<string, Object> | undefined = this.users.get(userId);
+    let status: Record<string, Object> | null | undefined = undefined;
+    if (user !== undefined) {
+      status = this.asRecord(user[TdField.STATUS]);
+    }
+    if (status === null || status === undefined) {
+      status = this.statusByUser.get(userId) ?? null;
+    }
+    if (status === null || status === undefined) {
+      return null;
+    }
+    const typeObj: Object | undefined = status[TdField.TYPE];
+    const type: string = typeof typeObj === 'string' ? typeObj : '';
+    if (type === TdType.USER_STATUS_ONLINE) {
+      return '在线';
+    }
+    if (type === TdType.USER_STATUS_OFFLINE) {
+      const wasOnline: number = this.readNumber(status, TdField.EXPIRES); // offline 语义：was_online
+      if (wasOnline > 0) {
+        return `最后见于 ${UserStore.formatWasOnline(wasOnline)}`;
+      }
+      return null;
+    }
+    if (type === 'userStatusRecently') {
+      return '最近在线';
+    }
+    if (type === 'userStatusLastWeek') {
+      return '最近一周在线';
+    }
+    if (type === 'userStatusLastMonth') {
+      return '最近一月在线';
+    }
+    return null;
+  }
+
+  /** was_online 时间戳 → 人性化文案（今天=HH:mm / 昨天 / 具体日期） */
+  private static formatWasOnline(unixSeconds: number): string {
+    const now: Date = new Date();
+    const then: Date = new Date(unixSeconds * 1000);
+    const sameDay: boolean = now.getFullYear() === then.getFullYear() &&
+      now.getMonth() === then.getMonth() && now.getDate() === then.getDate();
+    if (sameDay) {
+      const hh: string = `${then.getHours()}`.padStart(2, '0');
+      const mm: string = `${then.getMinutes()}`.padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+    const yesterday: Date = new Date(now.getTime() - 86400000);
+    const isYesterday: boolean = yesterday.getFullYear() === then.getFullYear() &&
+      yesterday.getMonth() === then.getMonth() && yesterday.getDate() === then.getDate();
+    if (isYesterday) {
+      return '昨天';
+    }
+    return `${then.getMonth() + 1}月${then.getDate()}日`;
+  }
+
   /** 展示名（first+last；无缓存空串） */
   displayName(userId: number): string {
     const user: Record<string, Object> | undefined = this.users.get(userId);

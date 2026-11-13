@@ -499,7 +499,7 @@ export struct MessageBubble {
       Column()
         .width(3)
         .height(30)
-        .borderRadius(2)
+        .borderRadius(5) // messageQuoteStyle.outline radius
         .backgroundColor(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.SERVICE_TEXT_IN)
       Column({ space: 1 }) {
         Text(this.model.replyToName.length > 0 ? this.model.replyToName : '消息')
@@ -519,7 +519,7 @@ export struct MessageBubble {
     }
     .width('100%')
     .alignItems(VerticalAlign.Center)
-    .padding({ left: 8, right: 8, top: 6, bottom: 2 })
+    .padding({ left: 11, right: 6, top: 2, bottom: 2 }) // historyReplyPadding(11,2,6,2)
     .onClick((): void => {
       this.onReplyJump(this.model.replyToMessageId);
     })
@@ -668,7 +668,7 @@ export struct MessageBubble {
             this.richBody(this.model.captionSegments, this.model.caption, 14, 20)
           }
           .alignItems(HorizontalAlign.Start)
-          .margin({ top: 4, left: 4, right: 4 })
+          .margin({ top: 5, left: 4, right: 4 }) // mediaCaptionSkip
         }
 
         if (this.model.sendState === BubbleSendState.FAILED) {
@@ -693,7 +693,7 @@ export struct MessageBubble {
       .backgroundColor('#54000000')
       .margin(4)
     }
-    .constraintSize({ maxWidth: '78%' })
+    .constraintSize({ maxWidth: 430 })
     .onClick((): void => {
       if (this.consumeLinkClick()) {
         return; // 链接切片点击已消费（见 linkClickConsumed 注释）
