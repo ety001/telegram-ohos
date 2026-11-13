@@ -38,7 +38,8 @@ import { KeyCode } from '@kit.InputKit';
 import { promptAction } from '@kit.ArkUI';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 import { ForwardPicker } from './ForwardPicker';
-import { PlusIcon, SendIcon, SearchIcon, CloseIcon } from './Icons';
+import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon } from './Icons';
+import { InputPanel, PanelKind } from './InputPanel';
 import { fileUri } from '@kit.CoreFileKit';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -113,6 +114,8 @@ export struct ChatPanel {
   @State searchDone: boolean = false;
   /** 搜索请求序号（PR17 审计 P1：慢响应丢弃，防跨会话/跨查询旧结果覆盖） */
   private searchSeq: number = 0;
+  // 输入面板（M7-A1）：'' = 关闭；emoji/贴纸/GIF（A2/A3 扩展）
+  @Link panelKind: string;
   // 跳转高亮（M6-2）：目标消息 id + 到期时间戳（setTimeout 清除）
   @State highlightMessageId: number = 0;
   private highlightTimer: number = -1;
@@ -202,6 +205,7 @@ export struct ChatPanel {
     this.editShowAbove = false;
     this.forwardMessageId = 0;
     this.overlayKind = OverlayKind.NONE;
+    this.panelKind = PanelKind.NONE;
     this.pendingJumpId = 0;
     // 搜索态归零（M6-5）：结果与输入属旧会话
     this.searchQuery = '';
@@ -288,6 +292,17 @@ export struct ChatPanel {
         })
         .onScrollIndex((first: number, last: number): void => {
           this.firstVisibleIndex = first;
+        })
+      }
+      if (this.panelKind !== PanelKind.NONE) {
+        InputPanel({
+          panelKind: $panelKind,
+          onEmojiPick: (emoji: string): void => {
+            this.applyProgrammaticInput(this.inputText + emoji);
+          },
+          onClose: (): void => {
+            this.closePanel();
+          }
         })
       }
       this.inputBar()
@@ -661,17 +676,33 @@ export struct ChatPanel {
             }
           })
 
-        Column({ space: 0 }) {
-          SendIcon({ iconSize: 18, iconColor: ChatUi.ACCENT }) // historySendIconFg
+        // 官方交互：输入空显示笑脸（开/关面板），非空切换发送钮（M7-A1）
+        if (this.inputText.trim().length === 0) {
+          Column({ space: 0 }) {
+            SmileIcon({
+              iconSize: 22,
+              iconColor: this.panelKind !== PanelKind.NONE ? ChatUi.ACCENT : '#6C7883'
+            })
+          }
+          .width(44)
+          .height(44)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .onClick((): void => {
+            this.togglePanel();
+          })
+        } else {
+          Column({ space: 0 }) {
+            SendIcon({ iconSize: 18, iconColor: ChatUi.ACCENT }) // historySendIconFg
+          }
+          .width(44)
+          .height(44)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .onClick((): void => {
+            this.sendCurrent();
+          })
         }
-        .width(44)
-        .height(44)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center)
-        .opacity(this.inputText.trim().length > 0 ? 1 : 0.4)
-        .onClick((): void => {
-          this.sendCurrent();
-        })
       }
       .width('100%')
       .constraintSize({ minHeight: 60, maxHeight: 152 })
@@ -798,6 +829,24 @@ export struct ChatPanel {
   private openForwardPicker(messageId: number): void {
     this.forwardMessageId = messageId;
     this.overlayKind = OverlayKind.FORWARD;
+  }
+
+  /** 面板开关（M7-A1）：展开时收起软键盘（focusController 清焦，失败静默） */
+  private togglePanel(): void {
+    if (this.panelKind === PanelKind.NONE) {
+      try {
+        this.getUIContext().getFocusController().clearFocus();
+      } catch (err) {
+        // 收焦失败（API/时机）：面板仍展开，键盘悬浮为已知限制
+      }
+      this.panelKind = PanelKind.EMOJI;
+    } else {
+      this.closePanel();
+    }
+  }
+
+  private closePanel(): void {
+    this.panelKind = PanelKind.NONE;
   }
 
   private showToast(message: string): void {

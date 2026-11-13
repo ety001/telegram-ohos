@@ -23,6 +23,8 @@ struct ChatPage {
   @State showSearch: boolean = false;
   /** 顶栏状态行（UI 打磨：私聊 在线/最后见于…，官方 historyStatusFg 语义） */
   @State statusLine: string = '';
+  /** 输入面板开关（M7-A1，@Link 传入 ChatPanel） */
+  @State panelKind: string = '';
   private readonly userObserver: () => void = (): void => {
     this.refreshStatus();
   };
@@ -110,7 +112,7 @@ struct ChatPage {
 
       // 消息流 + 输入区：ChatPanel 内嵌（生命周期/已读上报由组件自理）
       if (this.chatId !== 0) {
-        ChatPanel({ chatId: this.chatId, showSearch: $showSearch })
+        ChatPanel({ chatId: this.chatId, showSearch: $showSearch, panelKind: $panelKind })
       }
     }
     .width('100%')
