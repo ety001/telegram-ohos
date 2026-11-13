@@ -26,7 +26,7 @@ import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, AudioInfo, AnimationInfo, StickerInfo, ReplyRef } from '../core/MessageContent';
-import { FileDownloadStore } from '../core/FileDownloadStore';
+import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
 import { ChatListStore } from '../core/ChatListStore';
@@ -52,9 +52,9 @@ class OverlayKind {
 /** 消息分组时间窗（UI 打磨）：同发送者间隔 <10min 归同组 */
 const GROUP_WINDOW_SECONDS: number = 600;
 
-/** 两气泡是否可归同组（senderKey 相同 + 正向间隔 < 窗口） */
-function prevSameGroupable(a: MessageBubbleModel | null, b: MessageBubbleModel): boolean {
-  if (a === null) {
+/** 两气泡是否可归同组（senderKey 相同 + 正向间隔 < 窗口；a 在前 b 在后） */
+function sameGroupable(a: MessageBubbleModel | null, b: MessageBubbleModel | null): boolean {
+  if (a === null || b === null) {
     return false;
   }
   const gap: number = b.dateSeconds - a.dateSeconds;
@@ -140,14 +140,20 @@ export struct ChatPanel {
       this.rebuild();
     }
   };
+  // 用户对象/昵称到达（UI 打磨）：群聊发送者昵称异步补齐后重建刷新
+  private readonly userObserver: () => void = (): void => {
+    this.rebuild();
+  };
 
   aboutToAppear(): void {
     MessageStore.getInstance().addObserver(this.storeObserver);
+    UserStore.getInstance().addObserver(this.userObserver);
     this.switchChat();
   }
 
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
+    UserStore.getInstance().removeObserver(this.userObserver);
     if (this.activatedChatId !== 0) {
       // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）。
       // PR13 审计 P1-1：登出流程 reset 先行、组件后拆卸——此时登录态已离开 ready，
@@ -992,8 +998,8 @@ export struct ChatPanel {
         (next.messageId < 0 || next.sendState === BubbleSendState.FAILED);
       const prevSameDay: boolean = prev !== null && dayKeys[i - 1] === dayKeys[i];
       const nextSameDay: boolean = next !== null && dayKeys[i + 1] === dayKeys[i];
-      bubble.groupedWithPrev = !selfStable && !prevStable && prevSameGroupable(prev, bubble) && prevSameDay;
-      bubble.groupedWithNext = !selfStable && !nextStable && prevSameGroupable(next, bubble) && nextSameDay;
+      bubble.groupedWithPrev = !selfStable && !prevStable && sameGroupable(prev, bubble) && prevSameDay;
+      bubble.groupedWithNext = !selfStable && !nextStable && sameGroupable(bubble, next) && nextSameDay;
     }
     for (let i: number = 0; i < bubbles.length; i++) {
       const bubble: MessageBubbleModel = bubbles[i];
@@ -1275,6 +1281,14 @@ export struct ChatPanel {
       bubble.senderKey = 'peer';
       bubble.chatAvatarFileId = ChatListStore.getInstance().getAvatarFileId(this.chatId);
       bubble.chatAvatarMini = ChatListStore.getInstance().getAvatarMini(this.chatId);
+      // 头像下载触发（PR21 审计 P1-1）：列表页 ChatAvatar 已下载过的直接复用全局就绪态；
+      // 未渲染过的会话由此处兜底触发，下载完成经 UserStore→rebuild 链外的 FileDownloadStore
+      // 全局状态在下次 rebuild（新消息/切会话）取到——聊天页头像首帧 mini 先行可接受
+      const files: FileDownloadStore = FileDownloadStore.getInstance();
+      if (bubble.chatAvatarFileId !== 0 && !files.isReady(bubble.chatAvatarFileId) &&
+        !files.isFailed(bubble.chatAvatarFileId)) {
+        files.downloadFile(bubble.chatAvatarFileId, DownloadPriority.THUMBNAIL, 0, 0);
+      }
       return;
     }
     // 群聊：sender_id 解析

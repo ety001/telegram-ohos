@@ -235,7 +235,8 @@ export struct MessageBubble {
   @State voiceFileReady: boolean = false;
   /** 本次展示周期内已上报过已听（openMessageContent 幂等去重） */
   private listenReported: boolean = false;
-  // 贴纸/动图下载态（M6-7）
+  // 贴纸/动图下载态（M6-7）+ 私聊会话头像就绪（UI 打磨，组尾头像即时刷新）
+  @State chatAvatarReady: boolean = false;
   @State stickerReady: boolean = false;
   @State stickerThumbReady: boolean = false;
   @State animReady: boolean = false;
@@ -270,6 +271,9 @@ export struct MessageBubble {
       this.onAnimFileChanged();
     } else if (fileId === this.model.animThumbFileId && fileId !== 0) {
       this.animThumbReady = FileDownloadStore.getInstance().isReady(fileId);
+    } else if (fileId === this.model.chatAvatarFileId && fileId !== 0) {
+      // PR21 审计 P1-1：组尾会话头像下载完成即时刷新（@State 桥接触发重建）
+      this.chatAvatarReady = FileDownloadStore.getInstance().isReady(fileId);
     }
   };
 
@@ -455,8 +459,11 @@ export struct MessageBubble {
       return '';
     }
     const store: FileDownloadStore = FileDownloadStore.getInstance();
-    if (store.isReady(this.model.chatAvatarFileId)) {
-      return store.getReadyUri(this.model.chatAvatarFileId);
+    if (this.chatAvatarReady || store.isReady(this.model.chatAvatarFileId)) {
+      const uri: string = store.getReadyUri(this.model.chatAvatarFileId);
+      if (uri.length > 0) {
+        return uri;
+      }
     }
     return this.model.chatAvatarMini.length > 0 ? `data:image/jpeg;base64,${this.model.chatAvatarMini}` : '';
   }
