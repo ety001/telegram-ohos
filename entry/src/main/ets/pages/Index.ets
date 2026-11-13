@@ -25,6 +25,7 @@ import { FileDownloadStore } from '../core/FileDownloadStore';
 import { NotificationService, ChatRouteObserver } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
 import { UserStore } from '../core/UserStore';
+import { StickerStore } from '../core/StickerStore';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
@@ -177,6 +178,7 @@ struct Index {
       FileDownloadStore.getInstance().reset();
       NotificationService.getInstance().reset();
       DraftStore.getInstance().reset();
+      StickerStore.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
       this.chatStatusLine = '';

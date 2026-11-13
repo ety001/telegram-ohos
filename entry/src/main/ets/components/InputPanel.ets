@@ -157,15 +157,17 @@ export struct InputPanel {
 
   // ---------------- 贴纸 tab（M7-A2） ----------------
 
-  @State selectedSetId: number = 0;
+  // set id 为 int64 字符串（TDLib JSON 口径，PR25 审计 P0）
+  @State selectedSetId: string = '';
   @State stickerVersion: number = 0;
   private readonly stickerObserver: () => void = (): void => {
     // StickerStore 数据到达（installed/set 全量）：bump 版本驱动重渲染
     this.stickerVersion += 1;
-    if (this.selectedSetId === 0 && StickerStore.getInstance().getInstalled().length > 0) {
+    if (this.selectedSetId.length === 0 && StickerStore.getInstance().getInstalled().length > 0) {
       const first: Record<string, Object> | undefined = StickerStore.getInstance().getInstalled()[0];
       if (first !== undefined) {
-        this.selectedSetId = InputPanel.readNumber(first, InputPanel.fieldId());
+        // stickerSetInfo.id 为 int64 → JSON 字符串（PR25 审计 P0）
+        this.selectedSetId = StickerStore.readString(first, 'id');
         StickerStore.getInstance().ensureSet(this.selectedSetId);
       }
     }
@@ -193,11 +195,11 @@ export struct InputPanel {
             round: true
           })
             .onClick((): void => {
-              const setId: number = InputPanel.readNumber(set, InputPanel.fieldSetId());
+              const setId: string = StickerStore.readString(set, 'id');
               this.selectedSetId = setId;
               StickerStore.getInstance().ensureSet(setId);
             })
-        }, (set: Record<string, Object>) => `${InputPanel.readNumber(set, InputPanel.fieldSetId())}_${this.stickerVersion}`)
+        }, (set: Record<string, Object>) => `${StickerStore.readString(set, 'id')}_${this.stickerVersion}`)
         if (StickerStore.getInstance().getInstalled().length === 0) {
           Text('暂无贴纸包')
             .fontSize(12)
@@ -222,7 +224,7 @@ export struct InputPanel {
                 this.onStickerPick(sticker);
               })
           }
-        }, (sticker: Record<string, Object>) => `${InputPanel.readNumber(sticker, InputPanel.fieldStickerFileId())}_${this.stickerVersion}`)
+        }, (sticker: Record<string, Object>) => `${InputPanel.stickerKey(sticker)}_${this.stickerVersion}`)
       }
       .columnsTemplate('1fr 1fr 1fr 1fr 1fr')
       .layoutWeight(1)
@@ -234,22 +236,17 @@ export struct InputPanel {
     .layoutWeight(1)
   }
 
-  // —— stickerSetInfo/sticker 字段读取（Record 键取值，集中在此避免散落） ——
-  private static fieldId(): string {
-    return 'id';
-  }
-
-  private static fieldSetId(): string {
-    return 'set_id';
-  }
-
-  private static fieldStickerFileId(): string {
-    return 'id';
-  }
-
-  private static readNumber(record: Record<string, Object>, field: string): number {
-    const value: Object | undefined = record[field];
-    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  /** 网格 key：sticker.sticker.id（int32 file id，数字唯一） */
+  private static stickerKey(sticker: Record<string, Object>): number {
+    const file: Object | undefined = sticker['sticker'];
+    if (file !== null && typeof file === 'object' && !Array.isArray(file)) {
+      const rec: Record<string, Object> = file as Record<string, Object>;
+      const id: Object | undefined = rec['id'];
+      if (typeof id === 'number' && Number.isFinite(id)) {
+        return id;
+      }
+    }
+    return 0;
   }
 
   /** 贴纸包封面：covers 首个（无则占位空 sticker——StickerCell 兜底 emoji/灰底） */

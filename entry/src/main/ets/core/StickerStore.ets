@@ -19,6 +19,7 @@ const LOG_DOMAIN: number = 0x0012;
 const STICKER_TIMEOUT_MS: number = 20000;
 /** 全量贴纸 set 缓存上限（LRU） */
 const SET_CACHE_LIMIT: number = 4;
+// 注意：TDLib JSON 接口 int64 序列化为字符串（tl_json.h JsonString）——set_id 全链 string
 
 export type StickerStoreObserver = () => void;
 
@@ -28,10 +29,10 @@ export class StickerStore {
   /** 已安装贴纸包（stickerSetInfo 数组，官方顺序） */
   private installedSets: Array<Record<string, Object>> = new Array<Record<string, Object>>();
   private installedRequested: boolean = false;
-  /** set 全量贴纸缓存：set_id → sticker 数组（LRU：recentOrder 队首最新） */
-  private setStickers: Map<number, Array<Record<string, Object>>> = new Map();
-  private recentOrder: Array<number> = [];
-  private setInFlight: Set<number> = new Set();
+  /** set 全量贴纸缓存：set_id（int64 字符串）→ sticker 数组（LRU：recentOrder 队首最新） */
+  private setStickers: Map<string, Array<Record<string, Object>>> = new Map();
+  private recentOrder: Array<string> = [];
+  private setInFlight: Set<string> = new Set();
   /** 最近贴纸（getRecentStickers is_attached=false） */
   private recentStickers: Array<Record<string, Object>> = new Array<Record<string, Object>>();
   private recentRequested: boolean = false;
@@ -57,10 +58,15 @@ export class StickerStore {
     return this.installedSets;
   }
 
-  /** set 全量贴纸（未就绪返回空数组） */
-  getSetStickers(setId: number): Array<Record<string, Object>> {
+  /** set 全量贴纸（未就绪返回空数组；setId 为 int64 字符串） */
+  getSetStickers(setId: string): Array<Record<string, Object>> {
     const arr: Array<Record<string, Object>> | undefined = this.setStickers.get(setId);
     return arr === undefined ? new Array<Record<string, Object>>() : arr;
+  }
+
+  static readString(record: Record<string, Object>, field: string): string {
+    const value: Object | undefined = record[field];
+    return typeof value === 'string' ? value : '';
   }
 
   /** 最近贴纸 */
@@ -144,10 +150,10 @@ export class StickerStore {
     TdClient.getInstance().send(request);
   }
 
-  /** set 全量贴纸按需拉取（LRU 缓存 ≤4；在途去重） */
-  ensureSet(setId: number): void {
-    if (setId === 0 || this.setStickers.has(setId) || this.setInFlight.has(setId)) {
-      if (setId !== 0) {
+  /** set 全量贴纸按需拉取（LRU 缓存 ≤4；在途去重；setId 为 int64 字符串） */
+  ensureSet(setId: string): void {
+    if (setId.length === 0 || this.setStickers.has(setId) || this.setInFlight.has(setId)) {
+      if (setId.length > 0) {
         this.touchLru(setId);
       }
       return;
@@ -166,7 +172,7 @@ export class StickerStore {
         const stickers: Array<Record<string, Object>> = this.parseStickers(stickersObj);
         this.setStickers.set(setId, stickers);
         this.touchLru(setId);
-        hilog.info(LOG_DOMAIN, TAG, 'set %{public}s stickers: %{public}d', `${setId}`, stickers.length);
+        hilog.info(LOG_DOMAIN, TAG, 'set stickers: %{public}d', stickers.length);
         this.notifyChanged();
       })
       .catch((reason: string): void => {
@@ -218,14 +224,14 @@ export class StickerStore {
     return parsed;
   }
 
-  private touchLru(setId: number): void {
+  private touchLru(setId: string): void {
     const index: number = this.recentOrder.indexOf(setId);
     if (index >= 0) {
       this.recentOrder.splice(index, 1);
     }
     this.recentOrder.unshift(setId);
     while (this.recentOrder.length > SET_CACHE_LIMIT) {
-      const evicted: number | undefined = this.recentOrder.pop();
+      const evicted: string | undefined = this.recentOrder.pop();
       if (evicted === undefined) {
         break;
       }
