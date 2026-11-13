@@ -48,7 +48,7 @@ export class ChatUi {
   /** 本地草稿前缀色（Telegram 语义：未发送内容警示红） */
   static readonly DRAFT_LOCAL: string = '#E17076';
   /** 跳转高亮背景（M6-2/5：引用条/搜索结果跳转目标短暂强调） */
-  static readonly HIGHLIGHT_BG: string = '#332E70A5'; // msgOutBgSelected 33%
+  static readonly HIGHLIGHT_BG: string = '#332E70A5'; // msgOutBgSelected 20% 透明叠加
   // 消息气泡（msgInBg/msgOutBg，Night palette:256/258）
   static readonly BUBBLE_IN: string = '#182533';
   static readonly BUBBLE_OUT: string = '#2B5278';

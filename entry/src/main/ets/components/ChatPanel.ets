@@ -317,7 +317,7 @@ export struct ChatPanel {
           .layoutWeight(1)
           .height(36)
           .borderRadius(18)
-          .backgroundColor(ChatUi.INPUT_BG)
+          .backgroundColor(ChatUi.SEARCH_BG)
           .fontColor(ChatUi.TEXT_PRIMARY)
           .fontSize(14)
           .placeholderColor(ChatUi.TEXT_SECONDARY)
@@ -1312,7 +1312,7 @@ export struct ChatPanel {
       }
     }
     bubble.senderName = name.length > 0 ? name : '成员';
-    bubble.senderColor = ChatUi.avatarColor(senderId !== 0 ? senderId : this.chatId);
+    bubble.senderColor = ChatUi.peerNameColor(senderId !== 0 ? senderId : this.chatId); // 官方 NameFg 色板
     const letterSource: string = bubble.senderName;
     const codePoint: number | undefined = letterSource.codePointAt(0);
     bubble.senderLetter = codePoint === undefined ? '#' :

@@ -658,7 +658,7 @@ export struct MessageBubble {
               .fontColor('#FFFFFF')
               .padding({ left: 6, right: 6, top: 2, bottom: 2 })
               .borderRadius(7)
-              .backgroundColor('#00000054')
+              .backgroundColor('#54000000')
               .position({ x: 8, y: 8 })
           }
         }
@@ -690,7 +690,7 @@ export struct MessageBubble {
       }
       .padding({ left: 8, right: 8, top: 3, bottom: 3 })
       .borderRadius(10)
-      .backgroundColor('#00000054')
+      .backgroundColor('#54000000')
       .margin(4)
     }
     .constraintSize({ maxWidth: '78%' })
