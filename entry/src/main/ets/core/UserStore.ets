@@ -168,7 +168,7 @@ export class UserStore {
       return '在线';
     }
     if (type === TdType.USER_STATUS_OFFLINE) {
-      const wasOnline: number = this.readNumber(status, TdField.EXPIRES); // offline 语义：was_online
+      const wasOnline: number = this.readNumber(status, TdField.WAS_ONLINE); // userStatusOffline.was_online
       if (wasOnline > 0) {
         return `最后见于 ${UserStore.formatWasOnline(wasOnline)}`;
       }

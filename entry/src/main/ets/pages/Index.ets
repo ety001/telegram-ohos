@@ -177,6 +177,7 @@ struct Index {
       DraftStore.getInstance().reset();
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
+      this.chatStatusLine = '';
     }
   }
 
@@ -198,6 +199,7 @@ struct Index {
       if (!ChatListStore.getInstance().getOrderedIds().includes(this.selectedChatId)) {
         this.selectedChatId = 0;
         this.selectedChatTitle = '';
+        this.chatStatusLine = '';
         return;
       }
       const title: string = ChatListStore.getInstance().getTitle(this.selectedChatId);
@@ -368,6 +370,7 @@ struct Index {
     }
     this.selectedChatId = chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(chatId);
+    this.refreshChatStatus();
   }
 
   /**
