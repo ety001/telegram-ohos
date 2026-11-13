@@ -361,8 +361,8 @@ export struct MessageBubble {
         // 群聊发送者昵称（组首着色，仅非私聊 + incoming + 组首）
         if (!this.model.isOutgoing && this.model.senderName.length > 0 && !this.model.groupedWithPrev) {
           Text(this.model.senderName)
-            .fontSize(12)
-            .fontWeight(FontWeight.Medium)
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
             .fontColor(this.model.senderColor.length > 0 ? this.model.senderColor : ChatUi.TEXT_SECONDARY)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -371,9 +371,9 @@ export struct MessageBubble {
         // 转发来源标签（M6-3）：forward_info 存在即显示（名称不可解析时仅「转发的消息」）
         if (this.model.forwarded) {
           Text(this.model.forwardFrom.length > 0 ? `转发的消息：${this.model.forwardFrom}` : '转发的消息')
-            .fontSize(12)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+            .fontSize(13)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.SERVICE_TEXT_IN)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .padding({ left: 8, right: 8, top: 6 })
@@ -401,7 +401,7 @@ export struct MessageBubble {
       .borderRadius(13)
       .alignItems(HorizontalAlign.Start)
       // 分组间距（UI 打磨）：组内 2、跨组 10
-      .margin({ top: this.model.groupedWithPrev ? 1 : 10 })
+      .margin({ top: this.model.groupedWithPrev ? 0 : 6, bottom: 2 })
       // 跳转高亮（M6-2/5）：短暂强调背景色（与气泡自身底色叠加由透明度保证可辨识）
       .backgroundColor(this.model.highlighted ? ChatUi.HIGHLIGHT_BG : Color.Transparent)
       if (!this.model.isOutgoing) {
@@ -436,7 +436,7 @@ export struct MessageBubble {
             Image(this.senderAvatarSrc())
               .width(34)
               .height(34)
-              .borderRadius(17)
+              .borderRadius(16.5)
               .clip(true)
           } else {
             Text(this.model.senderLetter.length > 0 ? this.model.senderLetter : '#')
@@ -445,12 +445,12 @@ export struct MessageBubble {
               .fontColor('#FFFFFF')
           }
         }
-        .width(34)
-        .height(34)
+        .width(33)
+        .height(33)
       }
     }
-    .width(34)
-    .constraintSize({ minHeight: 34 })
+    .width(33)
+    .constraintSize({ minHeight: 33 })
   }
 
   /** 私聊会话头像源：下载完成 file URI > minithumbnail（群聊返回空走字母圆） */
@@ -473,8 +473,8 @@ export struct MessageBubble {
    * incoming 收左上/左下，outgoing 收右上/右下。
    */
   private groupedRadius(): BorderRadiuses {
-    const r: number = 12;
-    const s: number = 4;
+    const r: number = 16;
+    const s: number = 6;
     // incoming 收左上/左下，outgoing 收右上/右下（组内相邻侧 4；BorderRadiuses 为对象接口）
     const tl: number = !this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
     const tr: number = this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
@@ -484,13 +484,6 @@ export struct MessageBubble {
     return radius;
   }
 
-  /** outgoing 垂直渐变蓝（UI 打磨）；incoming 纯色（保持原观感，由发丝边提层次） */
-  private bubbleGradient(): LinearGradientOptions {
-    const stops: Array<[ResourceColor, number]> = this.model.isOutgoing
-      ? [['#4FA3F5', 0], ['#2E7BE6', 1]]
-      : [['#242F3D', 0], ['#242F3D', 1]];
-    return { angle: 180, colors: stops };
-  }
 
   /** incoming 发丝描边（outgoing 无边框） */
   private bubbleBorder(): BorderOptions {
@@ -507,17 +500,17 @@ export struct MessageBubble {
         .width(3)
         .height(30)
         .borderRadius(2)
-        .backgroundColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+        .backgroundColor(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.SERVICE_TEXT_IN)
       Column({ space: 1 }) {
         Text(this.model.replyToName.length > 0 ? this.model.replyToName : '消息')
           .fontSize(12)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+          .fontColor(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.SERVICE_TEXT_IN)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(this.model.replyToPreview.length > 0 ? this.model.replyToPreview : '加载中…')
           .fontSize(12)
-          .fontColor(this.model.isOutgoing ? '#DCE9F7' : ChatUi.TEXT_SECONDARY)
+          .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
@@ -665,7 +658,7 @@ export struct MessageBubble {
               .fontColor('#FFFFFF')
               .padding({ left: 6, right: 6, top: 2, bottom: 2 })
               .borderRadius(7)
-              .backgroundColor('#88000000')
+              .backgroundColor('#00000054')
               .position({ x: 8, y: 8 })
           }
         }
@@ -697,8 +690,8 @@ export struct MessageBubble {
       }
       .padding({ left: 8, right: 8, top: 3, bottom: 3 })
       .borderRadius(10)
-      .backgroundColor('#88000000')
-      .margin(6)
+      .backgroundColor('#00000054')
+      .margin(4)
     }
     .constraintSize({ maxWidth: '78%' })
     .onClick((): void => {
@@ -767,16 +760,16 @@ export struct MessageBubble {
             // 音频无波形：时长条降级
             Text(this.model.audioDurationText)
               .fontSize(12)
-              .fontColor(this.model.isOutgoing ? '#DCE9F7' : ChatUi.TEXT_SECONDARY)
+              .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
           }
           Row({ space: 8 }) {
             Text(this.voiceTimeText())
               .fontSize(11)
-              .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+              .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
             if (this.voicePlaying || this.voiceSpeed !== 1) {
               Text(`${this.voiceSpeed}x`)
                 .fontSize(11)
-                .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT)
+                .fontColor(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.SERVICE_TEXT_IN)
                 .onClick((): void => {
                   AudioPlayerController.getInstance().cycleSpeed(this.audioKey());
                 })
@@ -827,11 +820,11 @@ export struct MessageBubble {
         if (this.model.edited) {
           Text('已编辑')
             .fontSize(10)
-            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+            .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
         }
         Text(this.model.timeText)
           .fontSize(10)
-          .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+          .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
         this.stateMark()
       }
       .width('100%')
@@ -839,14 +832,12 @@ export struct MessageBubble {
       .alignItems(VerticalAlign.Center)
       }
     }
-    .constraintSize({ maxWidth: '78%' })
-    .padding({ left: 11, right: 11, top: 7, bottom: 7 })
+    .constraintSize({ maxWidth: 430 })
+    .padding({ left: 11, right: 11, top: 8, bottom: 8 })
     .borderRadius(this.groupedRadius())
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
     // UI 打磨：outgoing 垂直渐变蓝（覆盖底色）；incoming 发丝描边提层次
-    .linearGradient(this.bubbleGradient())
     .border(this.bubbleBorder())
-    .shadow({ radius: 8, color: '#3D000000', offsetX: 0, offsetY: 2 })
   }
 
   /** 播放目标 key（chatId:messageId；AudioPlayerController 互斥匹配用） */
@@ -1249,7 +1240,7 @@ export struct MessageBubble {
           Text(this.docStatusText())
             .fontSize(11)
             .fontColor(this.docState === DocActionState.FAILED ? ChatUi.BUBBLE_ERROR :
-              (this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY))
+              (this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.TEXT_SECONDARY))
             .maxLines(1)
         }
         .layoutWeight(1)
@@ -1287,11 +1278,11 @@ export struct MessageBubble {
         if (this.model.edited) {
           Text('已编辑')
             .fontSize(10)
-            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+            .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
         }
         Text(this.model.timeText)
           .fontSize(10)
-          .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+          .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
         this.stateMark()
       }
       .width('100%')
@@ -1300,14 +1291,12 @@ export struct MessageBubble {
       .margin({ top: 2 })
       }
     }
-    .constraintSize({ maxWidth: '78%' })
-    .padding({ left: 11, right: 11, top: 7, bottom: 7 })
+    .constraintSize({ maxWidth: 430 })
+    .padding({ left: 11, right: 11, top: 8, bottom: 8 })
     .borderRadius(this.groupedRadius())
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
     // UI 打磨：outgoing 垂直渐变蓝（覆盖底色）；incoming 发丝描边提层次
-    .linearGradient(this.bubbleGradient())
     .border(this.bubbleBorder())
-    .shadow({ radius: 8, color: '#3D000000', offsetX: 0, offsetY: 2 })
     .onClick((): void => {
       if (this.consumeLinkClick()) {
         return; // 链接切片点击已消费（见 linkClickConsumed 注释）
@@ -1327,7 +1316,7 @@ export struct MessageBubble {
         // 媒体类型占位（语音/动图/贴纸 M5 实装）或未知类型兜底——占位不崩溃
         Text(this.model.placeholder.length > 0 ? this.model.placeholder : '[暂不支持的消息类型]')
           .fontSize(13)
-          .fontColor(this.model.isOutgoing ? '#DCE9F7' : ChatUi.TEXT_SECONDARY)
+          .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
       }
       if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
         Row({ space: 4 }) {
@@ -1342,11 +1331,11 @@ export struct MessageBubble {
         if (this.model.edited) {
           Text('已编辑')
             .fontSize(10)
-            .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+            .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
         }
         Text(this.model.timeText)
           .fontSize(10)
-          .fontColor(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+          .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
         this.stateMark()
       }
       .width('100%')
@@ -1355,14 +1344,12 @@ export struct MessageBubble {
       .margin({ top: 2 })
       }
     }
-    .constraintSize({ maxWidth: '78%' })
-    .padding({ left: 11, right: 11, top: 7, bottom: 7 })
+    .constraintSize({ maxWidth: 430 })
+    .padding({ left: 11, right: 11, top: 8, bottom: 8 })
     .borderRadius(this.groupedRadius())
     .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
     // UI 打磨：outgoing 垂直渐变蓝（覆盖底色）；incoming 发丝描边提层次
-    .linearGradient(this.bubbleGradient())
     .border(this.bubbleBorder())
-    .shadow({ radius: 8, color: '#3D000000', offsetX: 0, offsetY: 2 })
     .onClick((): void => {
       if (this.consumeLinkClick()) {
         return; // 链接切片点击已消费（见 linkClickConsumed 注释）
@@ -1411,7 +1398,7 @@ export struct MessageBubble {
       Text(plain)
         .fontSize(fontSize)
         .lineHeight(lineHeight)
-        .fontColor(this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY)
+        .fontColor(this.model.isOutgoing ? '#E4ECF2' : ChatUi.TEXT_PRIMARY)
         .textAlign(TextAlign.Start)
     }
   }
@@ -1445,9 +1432,9 @@ export struct MessageBubble {
    */
   private segmentColorOf(segment: RichSegment): string {
     if (segment.link) {
-      return this.model.isOutgoing ? '#C9E1F8' : ChatUi.ACCENT;
+      return this.model.isOutgoing ? ChatUi.LINK_OUT : ChatUi.LINK_IN;
     }
-    return this.model.isOutgoing ? '#FFFFFF' : ChatUi.TEXT_PRIMARY;
+    return this.model.isOutgoing ? '#E4ECF2' : ChatUi.TEXT_PRIMARY;
   }
 
   /**
@@ -1724,13 +1711,13 @@ export struct MessageBubble {
       Stack({ alignContent: Alignment.Center }) {
         Circle({ width: 11, height: 11 })
           .fill(Color.Transparent)
-          .stroke(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+          .stroke(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.TEXT_SECONDARY)
           .strokeWidth(1)
         Rect({ width: 1, height: 3.5 })
-          .fill(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+          .fill(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.TEXT_SECONDARY)
           .offset({ x: 0, y: -2.2 })
         Rect({ width: 3, height: 1 })
-          .fill(this.model.isOutgoing ? '#C9E1F8' : ChatUi.TEXT_SECONDARY)
+          .fill(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.TEXT_SECONDARY)
           .offset({ x: 1.5, y: 0.5 })
       }
       .width(11)
@@ -1750,7 +1737,7 @@ export struct MessageBubble {
       Text(this.model.isRead ? '✓✓' : '✓')
         .fontSize(11)
         // 已读双勾弱化为浅色（Telegram 语义：单勾=已送出，双勾=已读）
-        .fontColor(this.model.isRead ? '#9AC3EC' : '#C9E1F8')
+        .fontColor(this.model.isRead ? ChatUi.DATE_TEXT_OUT : ChatUi.SERVICE_TEXT_OUT)
     }
   }
 }

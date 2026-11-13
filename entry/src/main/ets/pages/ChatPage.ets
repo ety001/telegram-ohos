@@ -74,7 +74,7 @@ struct ChatPage {
           })
       }
       .width('100%')
-      .height(52)
+      .height(54)
       .padding({ left: 14, right: 16 })
       .alignItems(VerticalAlign.Center)
       .backgroundColor(ChatUi.LIST_BG)

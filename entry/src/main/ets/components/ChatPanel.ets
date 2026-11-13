@@ -238,7 +238,7 @@ export struct ChatPanel {
       if (this.entries.length === 0) {
         this.emptyState()
       } else {
-        List({ space: 2, scroller: this.scroller }) {
+        List({ space: 0, scroller: this.scroller }) {
           ForEach(this.entries, (entry: ChatEntryModel) => {
             ListItem() {
               if (entry.isHeader) {
@@ -543,11 +543,12 @@ export struct ChatPanel {
   dayHeader(entry: ChatEntryModel) {
     Row() {
       Text(entry.headerText)
-        .fontSize(11)
-        .fontColor(ChatUi.TEXT_SECONDARY)
-        .padding({ left: 10, right: 10, top: 3, bottom: 3 })
-        .borderRadius(9)
-        .backgroundColor(ChatUi.SEARCH_BG)
+        .fontSize(12)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#FFFFFF') // msgServiceFg
+        .padding({ left: 12, right: 12, top: 3, bottom: 4 })
+        .borderRadius(12)
+        .backgroundColor('#D5213040') // msgServiceBg（#213040 + d5 alpha，ArkTS 前置 alpha）
     }
     .width('100%')
     .justifyContent(FlexAlign.Start)
@@ -618,29 +619,29 @@ export struct ChatPanel {
         .padding({ left: 16, right: 12, top: 4, bottom: 2 })
         .alignItems(VerticalAlign.Center)
       }
-      // 一体化输入胶囊（UI 打磨）：附件（＋ 圆钮 bindMenu）+ 透明 TextArea + 圆形纸飞机发送钮
-      Row({ space: 6 }) {
+      // 输入区（对齐 tdesktop compose controls：平贴面板色 radius 0，上下 9px，
+      // 附件/发送 44×44 图标钮——附件灰 menuIconFg，发送蓝 windowBgActive，无圆底）
+      Row({ space: 0 }) {
         Column({ space: 0 }) {
-          PlusIcon({ iconSize: 20, iconColor: ChatUi.TEXT_PRIMARY })
+          PlusIcon({ iconSize: 20, iconColor: '#6C7883' }) // menuIconFg
         }
-        .width(36)
-        .height(36)
-        .borderRadius(18)
+        .width(44)
+        .height(44)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
         .bindMenu(this.attachMenu())
-        .margin({ top: 2, bottom: 2 })
 
         TextArea({ text: this.inputText, placeholder: '输入消息' })
           .layoutWeight(1)
           .constraintSize({ minHeight: 40, maxHeight: 120 })
-          .borderRadius(18)
+          .borderRadius(0)
           .backgroundColor(Color.Transparent)
           .fontColor(ChatUi.TEXT_PRIMARY)
           .fontSize(15)
+          .caretColor(ChatUi.ACCENT)
           .placeholderColor(ChatUi.TEXT_SECONDARY)
           .placeholderFont({ size: 14 })
-          .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+          .padding({ left: 4, right: 4, top: 10, bottom: 10 })
           .maxLines(5)
           .textOverflow(TextOverflow.Ellipsis)
           .onChange((value: string): void => {
@@ -661,30 +662,24 @@ export struct ChatPanel {
           })
 
         Column({ space: 0 }) {
-          SendIcon({ iconSize: 17, iconColor: '#FFFFFF' })
+          SendIcon({ iconSize: 18, iconColor: ChatUi.ACCENT }) // historySendIconFg
         }
-        .width(36)
-        .height(36)
-        .borderRadius(18)
+        .width(44)
+        .height(44)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-        .backgroundColor(ChatUi.ACCENT)
         .opacity(this.inputText.trim().length > 0 ? 1 : 0.4)
-        .margin({ top: 2, bottom: 2 })
         .onClick((): void => {
           this.sendCurrent();
         })
       }
       .width('100%')
       .constraintSize({ minHeight: 60, maxHeight: 152 })
-      .padding({ left: 6, right: 6, top: 8, bottom: 8 })
-      .margin({ left: 12, right: 12, top: 6, bottom: 8 })
-      .borderRadius(24)
-      .backgroundColor(ChatUi.INPUT_BG)
+      .padding({ left: 2, right: 2, top: 6, bottom: 8 })
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .backgroundColor(ChatUi.LIST_BG)
+    .backgroundColor(ChatUi.INPUT_BG)
   }
 
   /** 附件菜单（M6-1）：图片 / 文件 */

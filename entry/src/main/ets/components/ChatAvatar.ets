@@ -10,7 +10,7 @@ import { ChatUi } from '../pages/ChatUi';
 import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 
 /** 在线绿点色（叠加在头像右下角描边圆） */
-const ONLINE_DOT_COLOR: string = '#7BC862';
+const ONLINE_DOT_COLOR: string = '#85DE85'; // historyPeer2NameFg 绿（tdesktop 在线语义）
 
 @Component
 export struct ChatAvatar {
