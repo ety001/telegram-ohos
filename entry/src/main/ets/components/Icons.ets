@@ -173,3 +173,47 @@ export struct BackIcon {
     .height(this.iconSize)
   }
 }
+
+/** 笑脸（官方 input_smile_face 语义）：圆环 + 双眼点 + 弧形嘴 */
+@Component
+export struct SmileIcon {
+  iconSize: number = 22;
+  iconColor: string = '#6C7883';
+  lineWidth: number = 1.8;
+
+  build() {
+    Stack() {
+      // 外圆环
+      Circle()
+        .width(this.iconSize * 0.86)
+        .height(this.iconSize * 0.86)
+        .fillOpacity(0)
+        .stroke(this.iconColor)
+        .strokeWidth(this.lineWidth)
+      // 左眼
+      Circle()
+        .width(this.iconSize * 0.09)
+        .height(this.iconSize * 0.09)
+        .fill(this.iconColor)
+        .translate({ x: -this.iconSize * 0.16, y: -this.iconSize * 0.14 })
+      // 右眼
+      Circle()
+        .width(this.iconSize * 0.09)
+        .height(this.iconSize * 0.09)
+        .fill(this.iconColor)
+        .translate({ x: this.iconSize * 0.16, y: -this.iconSize * 0.14 })
+      // 微笑弧嘴（下弯弧线）
+      Path()
+        .width(this.iconSize * 0.5)
+        .height(this.iconSize * 0.3)
+        .commands(`M${this.iconSize * 0.06} ${this.iconSize * 0.06} A ${this.iconSize * 0.19} ${this.iconSize * 0.19} 0 0 0 ${this.iconSize * 0.44} ${this.iconSize * 0.06}`)
+        .fillOpacity(0)
+        .stroke(this.iconColor)
+        .strokeWidth(this.lineWidth)
+        .strokeLineCap(LineCapStyle.Round)
+        .translate({ x: this.iconSize * 0.0, y: this.iconSize * 0.18 })
+    }
+    .width(this.iconSize)
+    .height(this.iconSize)
+  }
+}

@@ -100,6 +100,8 @@ struct Index {
   private serverSearchTimer: number = -1;
   /** 聊天区搜索条开关（M6-5，@Link 传入 ChatPanel） */
   @State chatSearchOpen: boolean = false;
+  /** 输入面板开关（M7-A1，@Link 传入 ChatPanel） */
+  @State chatPanelKind: string = '';
   /** 聊天区顶栏状态行（UI 打磨：私聊 在线/最后见于…） */
   @State chatStatusLine: string = '';
   private readonly chatUserObserver: () => void = (): void => {
@@ -178,6 +180,8 @@ struct Index {
       this.selectedChatId = 0;
       this.selectedChatTitle = '';
       this.chatStatusLine = '';
+      this.chatPanelKind = '';
+      this.chatSearchOpen = false;
     }
   }
 
@@ -747,7 +751,7 @@ struct Index {
         .alignItems(VerticalAlign.Center)
         .backgroundColor(ChatUi.LIST_BG)
 
-        ChatPanel({ chatId: this.selectedChatId, showSearch: $chatSearchOpen })
+        ChatPanel({ chatId: this.selectedChatId, showSearch: $chatSearchOpen, panelKind: $chatPanelKind })
       } else {
         Column() {
           Blank()
