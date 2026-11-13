@@ -72,6 +72,13 @@ export class TdReq {
   // 语音已听上报（M6-6）
   // 1.8.63 schema：openMessageContent(chat_id:int53, message_id:int53) = Ok——语音播放后标记已听
   static readonly OPEN_MESSAGE_CONTENT: string = 'openMessageContent';
+  // 贴纸面板（M7-A2）
+  // 1.8.63 schema：getInstalledStickerSets(sticker_type:StickerType) = StickerSets
+  static readonly GET_INSTALLED_STICKER_SETS: string = 'getInstalledStickerSets';
+  // 1.8.63 schema：getStickerSet(set_id:int64) = StickerSet（全量含 stickers）
+  static readonly GET_STICKER_SET: string = 'getStickerSet';
+  // 1.8.63 schema：getRecentStickers(is_attached:Bool) = Stickers
+  static readonly GET_RECENT_STICKERS: string = 'getRecentStickers';
 }
 
 export class TdUpdate {
@@ -204,6 +211,13 @@ export class TdType {
   // 会话内搜索（M6-5；foundChatMessages 结果对象 / 过滤器空集）
   static readonly FOUND_CHAT_MESSAGES: string = 'foundChatMessages';
   static readonly SEARCH_MESSAGES_FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
+  // 贴纸（M7-A2；stickerType 判别与面板数据源结果对象）
+  static readonly STICKER_TYPE_REGULAR: string = 'stickerTypeRegular';
+  static readonly RESULT_STICKER_SETS: string = 'stickerSets';
+  static readonly RESULT_STICKER_SET: string = 'stickerSet';
+  static readonly RESULT_STICKERS: string = 'stickers';
+  // @mention 补全（M7-A3；chatMembersFilterMention 专用可提及成员查询）
+  static readonly CHAT_MEMBERS_FILTER_MENTION: string = 'chatMembersFilterMention';
   // 贴纸格式（M6-7；sticker.format:StickerFormat 判别——webp 静态可直渲，tgs/webm 动效挂 M7）
   static readonly STICKER_FORMAT_WEBP: string = 'stickerFormatWebp';
   static readonly STICKER_FORMAT_TGS: string = 'stickerFormatTgs';
@@ -296,6 +310,12 @@ export class TdField {
   // 贴纸（M6-7；sticker{format,emoji,sticker:file} / thumbnail.file）
   static readonly FORMAT: string = 'format';
   static readonly EMOJI: string = 'emoji';
+  // 贴纸面板（M7-A2；stickerSetInfo/StickerSets/StickerSet 结构字段）
+  static readonly SET_ID: string = 'set_id';
+  static readonly SETS: string = 'sets';
+  static readonly COVERS: string = 'covers';
+  static readonly STICKERS: string = 'stickers';
+  static readonly STICKER_TYPE: string = 'sticker_type';
   static readonly FIRST_NAME: string = 'first_name';
   static readonly LAST_NAME: string = 'last_name';
   static readonly EXPIRES: string = 'expires';
