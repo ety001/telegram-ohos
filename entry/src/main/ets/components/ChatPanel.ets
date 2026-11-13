@@ -40,6 +40,7 @@ import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 import { ForwardPicker } from './ForwardPicker';
 import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon } from './Icons';
 import { InputPanel, PanelKind } from './InputPanel';
+import { StickerStore } from '../core/StickerStore';
 import { fileUri } from '@kit.CoreFileKit';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -299,6 +300,9 @@ export struct ChatPanel {
           panelKind: $panelKind,
           onEmojiPick: (emoji: string): void => {
             this.applyProgrammaticInput(this.inputText + emoji);
+          },
+          onStickerPick: (sticker: Record<string, Object>): void => {
+            MessageStore.getInstance().sendSticker(this.chatId, sticker);
           },
           onClose: (): void => {
             this.closePanel();
@@ -844,6 +848,7 @@ export struct ChatPanel {
         // 收焦失败（API/时机）：面板仍展开，键盘悬浮为已知限制
       }
       this.panelKind = PanelKind.EMOJI;
+      StickerStore.getInstance().ensureBase(); // 贴纸 tab 数据预取（A2）
     } else {
       this.closePanel();
     }

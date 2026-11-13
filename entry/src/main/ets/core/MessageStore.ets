@@ -196,6 +196,106 @@ export class MessageStore {
     }
   };
 
+  /**
+   * 发送贴纸（M7-A2）：本地占位（emoji 气泡）→ sendMessage + inputMessageSticker
+   * {sticker:inputFileId{id}}——已存在的贴纸文件按 file_id 重发（inputFileId schema 核对存在；
+   * 服务端拒绝时降级路径：先 download 再 inputFileLocal，登记计划 §7）。
+   * width/height 缺省 512（官方贴纸标准尺寸）。
+   */
+  sendSticker(chatId: number, sticker: Record<string, Object>): void {
+    if (chatId === 0 || !this.started) {
+      return;
+    }
+    const emoji: string = this.readStringField(sticker, TdField.EMOJI);
+    const width: number = this.readNumberOr(sticker, TdField.WIDTH, 512);
+    const height: number = this.readNumberOr(sticker, TdField.HEIGHT, 512);
+    const stickerFile: Record<string, Object> | null = this.asRecord(sticker[TdField.STICKER]);
+    const fileId: number = stickerFile === null ? 0 : this.readNumberOr(stickerFile, TdField.ID, 0);
+    if (fileId === 0) {
+      return;
+    }
+    this.localIdSeq += 1;
+    const localId: number = LOCAL_ID_BASE - this.localIdSeq;
+    const placeholderContent: Record<string, Object> = {
+      ['@type']: TdMessageContent.STICKER,
+      'sticker': {
+        ['@type']: 'sticker',
+        'emoji': emoji,
+        'width': width,
+        'height': height
+      } as Record<string, Object>
+    };
+    const sendingState: Record<string, Object> = { ['@type']: TdSendingState.PENDING };
+    const placeholder: Record<string, Object> = {
+      'id': localId,
+      'chat_id': chatId,
+      'is_outgoing': true,
+      'date': Math.floor(Date.now() / 1000),
+      'content': placeholderContent,
+      'sending_state': sendingState
+    };
+    const cache: ChatMessageCache = this.ensureCache(chatId);
+    this.insertMessage(cache, placeholder);
+
+    this.actionSeq += 1;
+    const extra: string = `sendSticker_${this.actionSeq}`;
+    const pending: PendingSend = { chatId: chatId, localId: localId, text: `[贴纸 ${emoji}]` };
+    this.pendingSends.set(extra, pending);
+    TdUpdateRouter.getInstance().waitForExtra(extra, SEND_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        this.pendingSends.delete(extra);
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+        if (type === ErrorType.INVALID) {
+          this.markPlaceholderFailed(chatId, localId, '发送失败');
+          this.notifyChanged(chatId);
+          return;
+        }
+        const live: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (live === undefined) {
+          return;
+        }
+        this.removeById(live, localId);
+        const tempMessage: Record<string, Object> | null = this.asRecord(update);
+        if (tempMessage !== null) {
+          this.insertMessage(live, tempMessage);
+        }
+        this.notifyChanged(chatId);
+      })
+      .catch((reason: string): void => {
+        this.pendingSends.delete(extra);
+        this.markPlaceholderFailed(chatId, localId, '发送超时');
+        this.notifyChanged(chatId);
+      });
+    const stickerInput: Record<string, Object> = { ['@type']: 'inputFileId', 'id': fileId };
+    const inputContent: Record<string, Object> = {
+      ['@type']: 'inputMessageSticker',
+      'sticker': stickerInput,
+      'width': width,
+      'height': height,
+      'emoji': emoji
+    };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEND_MESSAGE,
+      'chat_id': chatId,
+      'input_message_content': inputContent
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    hilog.info(LOG_DOMAIN, TAG, 'sendSticker: chat=%{public}s fileId=%{public}d', `${chatId}`, fileId);
+  }
+
+  /** 字段读取兜底（缺失回默认值） */
+  private readNumberOr(source: Record<string, Object>, field: string, fallback: number): number {
+    const value: number = this.readNumber(source, field);
+    return value === 0 ? fallback : value;
+  }
+
+  private readStringField(source: Record<string, Object>, field: string): string {
+    const value: Object | undefined = source[field];
+    return typeof value === 'string' ? value : '';
+  }
+
   /** 语音已听上报（M6-6）：openMessageContent——is_listened 由 updateMessageContent 刷新 */
   reportListened(chatId: number, messageId: number): void {
     if (chatId === 0 || messageId <= 0 || !this.started) {
