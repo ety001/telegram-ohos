@@ -139,6 +139,11 @@ export class ChatListStore {
     return this.readNumber(type, TdField.USER_ID);
   }
 
+  /** 是否私聊（UI 打磨：私聊不显示发送者昵称，头像用会话头像） */
+  isPrivateChat(chatId: number): boolean {
+    return this.privateUserIdOf(chatId) !== 0;
+  }
+
   /** 私聊在线判定（在线状态由 UserStore 维护） */
   isOnline(chatId: number): boolean {
     const userId: number = this.privateUserIdOf(chatId);

@@ -14,6 +14,7 @@ import { AuthService } from '../core/AuthService';
 import { ConfigStore } from '../core/ConfigStore';
 import { TdClient } from '../tdlib/TdClient';
 import { TdReq, TdField, ErrorType } from '../core/TdConstants';
+import { BackIcon } from '../components/Icons';
 
 /** 应用版本（与 AppScope/app.json5 versionName 同步维护） */
 const APP_VERSION: string = '0.3.0';
@@ -38,12 +39,9 @@ struct SettingsPage {
     Column() {
       // 顶栏：返回 + 标题
       Row({ space: 12 }) {
-        Text('<')
-          .fontSize(24)
-          .fontColor(ChatUi.TEXT_PRIMARY)
+        BackIcon({ iconSize: 20, iconColor: ChatUi.TEXT_PRIMARY })
           .width(32)
           .height(32)
-          .textAlign(TextAlign.Center)
           .onClick((): void => {
             router.back();
           })

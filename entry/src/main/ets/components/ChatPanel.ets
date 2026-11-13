@@ -21,15 +21,16 @@
  */
 import { MessageStore, MessageStoreObserver } from '../core/MessageStore';
 import { TimeFormat } from '../core/TimeFormat';
-import { TdField, TdMessageContent, TdSendingState } from '../core/TdConstants';
+import { TdField, TdMessageContent, TdSendingState, TdType } from '../core/TdConstants';
 import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
 import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInfo, AudioInfo, AnimationInfo, StickerInfo, ReplyRef } from '../core/MessageContent';
-import { FileDownloadStore } from '../core/FileDownloadStore';
+import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
 import { ChatListStore } from '../core/ChatListStore';
+import { UserStore } from '../core/UserStore';
 import { AuthService, AppAuthState } from '../core/AuthService';
 import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -37,6 +38,7 @@ import { KeyCode } from '@kit.InputKit';
 import { promptAction } from '@kit.ArkUI';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
 import { ForwardPicker } from './ForwardPicker';
+import { PlusIcon, SendIcon, SearchIcon, CloseIcon } from './Icons';
 import { fileUri } from '@kit.CoreFileKit';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -45,6 +47,18 @@ class OverlayKind {
   static readonly PHOTO: string = 'photo';
   static readonly VIDEO: string = 'video';
   static readonly FORWARD: string = 'forward';
+}
+
+/** 消息分组时间窗（UI 打磨）：同发送者间隔 <10min 归同组 */
+const GROUP_WINDOW_SECONDS: number = 600;
+
+/** 两气泡是否可归同组（senderKey 相同 + 正向间隔 < 窗口；a 在前 b 在后） */
+function sameGroupable(a: MessageBubbleModel | null, b: MessageBubbleModel | null): boolean {
+  if (a === null || b === null) {
+    return false;
+  }
+  const gap: number = b.dateSeconds - a.dateSeconds;
+  return a.senderKey === b.senderKey && gap >= 0 && gap < GROUP_WINDOW_SECONDS;
 }
 
 /** 会话内搜索命中条目（M6-5；点击跳转定位） */
@@ -126,14 +140,20 @@ export struct ChatPanel {
       this.rebuild();
     }
   };
+  // 用户对象/昵称到达（UI 打磨）：群聊发送者昵称异步补齐后重建刷新
+  private readonly userObserver: () => void = (): void => {
+    this.rebuild();
+  };
 
   aboutToAppear(): void {
     MessageStore.getInstance().addObserver(this.storeObserver);
+    UserStore.getInstance().addObserver(this.userObserver);
     this.switchChat();
   }
 
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
+    UserStore.getInstance().removeObserver(this.userObserver);
     if (this.activatedChatId !== 0) {
       // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）。
       // PR13 审计 P1-1：登出流程 reset 先行、组件后拆卸——此时登录态已离开 ready，
@@ -311,21 +331,23 @@ export struct ChatPanel {
             event.keepEditableState();
             this.runSearch();
           })
-        Text(this.searchPending ? '…' : '搜索')
-          .fontSize(14)
-          .fontColor(ChatUi.ACCENT)
-          .height(32)
-          .padding({ left: 12, right: 12 })
-          .textAlign(TextAlign.Center)
-          .onClick((): void => {
-            this.runSearch();
-          })
-        Text('✕')
-          .fontSize(14)
-          .fontColor(ChatUi.TEXT_SECONDARY)
+        if (this.searchPending) {
+          LoadingProgress()
+            .width(18)
+            .height(18)
+            .color(ChatUi.ACCENT)
+            .margin({ left: 8, right: 8 })
+        } else {
+          SearchIcon({ iconSize: 17, iconColor: ChatUi.ACCENT })
+            .width(34)
+            .height(32)
+            .onClick((): void => {
+              this.runSearch();
+            })
+        }
+        CloseIcon({ iconSize: 14, iconColor: ChatUi.TEXT_SECONDARY })
           .width(30)
           .height(32)
-          .textAlign(TextAlign.Center)
           .onClick((): void => {
             this.closeSearch();
           })
@@ -380,8 +402,8 @@ export struct ChatPanel {
           .fontColor(ChatUi.TEXT_SECONDARY)
           .opacity(0.7)
           .width('100%')
-          .textAlign(TextAlign.Center)
-          .padding({ top: 4, bottom: 6 })
+          .textAlign(TextAlign.Start)
+          .padding({ left: 18, top: 4, bottom: 6 })
       }
     }
     .width('100%')
@@ -516,7 +538,7 @@ export struct ChatPanel {
     .justifyContent(FlexAlign.Center)
   }
 
-  /** 按天分组头（居中小胶囊） */
+  /** 按天分组头（UI 打磨：左对齐小胶囊——用户反馈日期信息不要居中） */
   @Builder
   dayHeader(entry: ChatEntryModel) {
     Row() {
@@ -528,8 +550,8 @@ export struct ChatPanel {
         .backgroundColor(ChatUi.SEARCH_BG)
     }
     .width('100%')
-    .justifyContent(FlexAlign.Center)
-    .padding({ top: 8, bottom: 4 })
+    .justifyContent(FlexAlign.Start)
+    .padding({ left: 12, top: 8, bottom: 4 })
   }
 
   /**
@@ -556,12 +578,9 @@ export struct ChatPanel {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Text('✕')
-            .fontSize(14)
-            .fontColor(ChatUi.TEXT_SECONDARY)
+          CloseIcon({ iconSize: 14, iconColor: ChatUi.TEXT_SECONDARY })
             .width(30)
             .height(26)
-            .textAlign(TextAlign.Center)
             .onClick((): void => {
               this.cancelReply();
             })
@@ -588,12 +607,9 @@ export struct ChatPanel {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Text('✕')
-            .fontSize(14)
-            .fontColor(ChatUi.TEXT_SECONDARY)
+          CloseIcon({ iconSize: 14, iconColor: ChatUi.TEXT_SECONDARY })
             .width(30)
             .height(26)
-            .textAlign(TextAlign.Center)
             .onClick((): void => {
               this.cancelEdit();
             })
@@ -602,23 +618,29 @@ export struct ChatPanel {
         .padding({ left: 16, right: 12, top: 4, bottom: 2 })
         .alignItems(VerticalAlign.Center)
       }
-      Row({ space: 8 }) {
-        Text('📎')
-          .fontSize(22)
-          .width(40)
-          .height(40)
-          .textAlign(TextAlign.Center)
-          .bindMenu(this.attachMenu())
+      // 一体化输入胶囊（UI 打磨）：附件（＋ 圆钮 bindMenu）+ 透明 TextArea + 圆形纸飞机发送钮
+      Row({ space: 6 }) {
+        Column({ space: 0 }) {
+          PlusIcon({ iconSize: 20, iconColor: ChatUi.TEXT_PRIMARY })
+        }
+        .width(36)
+        .height(36)
+        .borderRadius(18)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .bindMenu(this.attachMenu())
+        .margin({ top: 2, bottom: 2 })
+
         TextArea({ text: this.inputText, placeholder: '输入消息' })
           .layoutWeight(1)
           .constraintSize({ minHeight: 40, maxHeight: 120 })
-          .borderRadius(20)
-          .backgroundColor(ChatUi.INPUT_BG)
+          .borderRadius(18)
+          .backgroundColor(Color.Transparent)
           .fontColor(ChatUi.TEXT_PRIMARY)
           .fontSize(15)
           .placeholderColor(ChatUi.TEXT_SECONDARY)
           .placeholderFont({ size: 14 })
-          .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+          .padding({ left: 10, right: 10, top: 10, bottom: 10 })
           .maxLines(5)
           .textOverflow(TextOverflow.Ellipsis)
           .onChange((value: string): void => {
@@ -637,23 +659,28 @@ export struct ChatPanel {
               this.sendCurrent();
             }
           })
-        Text('发送')
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .height(36)
-          .borderRadius(18)
-          .padding({ left: 16, right: 16 })
-          .textAlign(TextAlign.Center)
-          .backgroundColor(ChatUi.ACCENT)
-          .opacity(this.inputText.trim().length > 0 ? 1 : 0.4)
-          .onClick((): void => {
-            this.sendCurrent();
-          })
+
+        Column({ space: 0 }) {
+          SendIcon({ iconSize: 17, iconColor: '#FFFFFF' })
+        }
+        .width(36)
+        .height(36)
+        .borderRadius(18)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor(ChatUi.ACCENT)
+        .opacity(this.inputText.trim().length > 0 ? 1 : 0.4)
+        .margin({ top: 2, bottom: 2 })
+        .onClick((): void => {
+          this.sendCurrent();
+        })
       }
       .width('100%')
-      .constraintSize({ minHeight: 60, maxHeight: 140 })
-      .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+      .constraintSize({ minHeight: 60, maxHeight: 152 })
+      .padding({ left: 6, right: 6, top: 8, bottom: 8 })
+      .margin({ left: 12, right: 12, top: 6, bottom: 8 })
+      .borderRadius(24)
+      .backgroundColor(ChatUi.INPUT_BG)
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
@@ -945,13 +972,37 @@ export struct ChatPanel {
     const store: MessageStore = MessageStore.getInstance();
     const messages: Array<Record<string, Object>> = store.getMessages(this.chatId);
     const previous: Array<ChatEntryModel> = this.entries;
-    const previousFirstKey: string = previous.length > 0 ? previous[0].key : '';
     const previousLastKey: string = previous.length > 0 ? previous[previous.length - 1].key : '';
 
     const entries: Array<ChatEntryModel> = new Array<ChatEntryModel>();
     let lastDayKey: number = -1;
+    // 消息分组（UI 打磨）：同 senderKey + 间隔 <10min 为同组（时间去冗余/组合圆角/组尾头像）。
+    // 分组标志先行两两计算（含日期边界裁剪），再生成 entries——保证 keySuffix 含最终分组态
+    const bubbles: Array<MessageBubbleModel> = new Array<MessageBubbleModel>();
     for (const message of messages) {
-      const bubble: MessageBubbleModel = this.buildBubble(message);
+      bubbles.push(this.buildBubble(message));
+    }
+    const dayKeys: Array<number> = new Array<number>();
+    for (const bubble of bubbles) {
+      dayKeys.push(bubble.dayKey);
+    }
+    for (let i: number = 0; i < bubbles.length; i++) {
+      const bubble: MessageBubbleModel = bubbles[i];
+      const prev: MessageBubbleModel | null = i > 0 ? bubbles[i - 1] : null;
+      const next: MessageBubbleModel | null = i < bubbles.length - 1 ? bubbles[i + 1] : null;
+      // 占位/失败消息不参与分组（乐观发送中途态不污染分组边界）
+      const selfStable: boolean = bubble.messageId < 0 || bubble.sendState === BubbleSendState.FAILED;
+      const prevStable: boolean = prev !== null &&
+        (prev.messageId < 0 || prev.sendState === BubbleSendState.FAILED);
+      const nextStable: boolean = next !== null &&
+        (next.messageId < 0 || next.sendState === BubbleSendState.FAILED);
+      const prevSameDay: boolean = prev !== null && dayKeys[i - 1] === dayKeys[i];
+      const nextSameDay: boolean = next !== null && dayKeys[i + 1] === dayKeys[i];
+      bubble.groupedWithPrev = !selfStable && !prevStable && sameGroupable(prev, bubble) && prevSameDay;
+      bubble.groupedWithNext = !selfStable && !nextStable && sameGroupable(bubble, next) && nextSameDay;
+    }
+    for (let i: number = 0; i < bubbles.length; i++) {
+      const bubble: MessageBubbleModel = bubbles[i];
       if (bubble.dayKey !== lastDayKey) {
         const header: ChatEntryModel = new ChatEntryModel();
         header.isHeader = true;
@@ -1014,6 +1065,7 @@ export struct ChatPanel {
     bubble.messageId = ChatPanel.readNumber(message, TdField.ID);
     bubble.chatId = this.chatId;
     bubble.isOutgoing = message[TdField.IS_OUTGOING] === true;
+    this.attachSender(bubble, message);
     bubble.dateSeconds = ChatPanel.readNumber(message, TdField.DATE);
     bubble.timeText = TimeFormat.formatTime(bubble.dateSeconds);
     bubble.dayKey = TimeFormat.dayKeyOf(bubble.dateSeconds);
@@ -1208,6 +1260,68 @@ export struct ChatPanel {
   private chatTitleFallback(): string {
     const title: string = ChatListStore.getInstance().getTitle(this.chatId);
     return title.length > 0 ? title : '成员';
+  }
+
+  /**
+   * 发送者投影（UI 打磨）：
+   * - senderKey 分组键：outgoing='me'；私聊 incoming='peer'；群聊=messageSenderUser.user_id /
+   *   messageSenderChat.chat_id 字符串（匿名群管理员以 chat 发送者出现）；
+   * - 私聊 incoming：头像用会话头像（chatAvatarFileId 三级渲染）；
+   * - 群聊 incoming：昵称 = UserStore.displayName（user_id 异步 ensureUser，到达后重建刷新），
+   *   着色/首字母按 user_id hash；精确头像挂 M7 用户头像体系；
+   * - outgoing：无头像无昵称（右侧自分）。
+   */
+  private attachSender(bubble: MessageBubbleModel, message: Record<string, Object>): void {
+    if (bubble.isOutgoing) {
+      bubble.senderKey = 'me';
+      return;
+    }
+    const isPrivate: boolean = ChatListStore.getInstance().isPrivateChat(this.chatId);
+    if (isPrivate) {
+      bubble.senderKey = 'peer';
+      bubble.chatAvatarFileId = ChatListStore.getInstance().getAvatarFileId(this.chatId);
+      bubble.chatAvatarMini = ChatListStore.getInstance().getAvatarMini(this.chatId);
+      // 头像下载触发（PR21 审计 P1-1）：列表页 ChatAvatar 已下载过的直接复用全局就绪态；
+      // 未渲染过的会话由此处兜底触发，下载完成经 UserStore→rebuild 链外的 FileDownloadStore
+      // 全局状态在下次 rebuild（新消息/切会话）取到——聊天页头像首帧 mini 先行可接受
+      const files: FileDownloadStore = FileDownloadStore.getInstance();
+      if (bubble.chatAvatarFileId !== 0 && !files.isReady(bubble.chatAvatarFileId) &&
+        !files.isFailed(bubble.chatAvatarFileId)) {
+        files.downloadFile(bubble.chatAvatarFileId, DownloadPriority.THUMBNAIL, 0, 0);
+      }
+      return;
+    }
+    // 群聊：sender_id 解析
+    const sender: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.SENDER_ID]);
+    let senderId: number = 0;
+    let isUserSender: boolean = true;
+    if (sender !== null) {
+      const typeObj: Object | undefined = sender[TdField.TYPE];
+      if (typeObj === TdType.MESSAGE_SENDER_USER) {
+        senderId = ChatPanel.readNumber(sender, TdField.USER_ID);
+      } else if (typeObj === TdType.MESSAGE_SENDER_CHAT) {
+        senderId = ChatPanel.readNumber(sender, TdField.CHAT_ID);
+        isUserSender = false;
+      }
+    }
+    bubble.senderKey = senderId !== 0 ? `s${senderId}` : 'peer';
+    let name: string = '';
+    if (senderId !== 0) {
+      if (isUserSender) {
+        name = UserStore.getInstance().displayName(senderId);
+        if (name.length === 0) {
+          UserStore.getInstance().ensureUser(senderId);
+        }
+      } else {
+        name = ChatListStore.getInstance().getTitle(senderId);
+      }
+    }
+    bubble.senderName = name.length > 0 ? name : '成员';
+    bubble.senderColor = ChatUi.avatarColor(senderId !== 0 ? senderId : this.chatId);
+    const letterSource: string = bubble.senderName;
+    const codePoint: number | undefined = letterSource.codePointAt(0);
+    bubble.senderLetter = codePoint === undefined ? '#' :
+      String.fromCodePoint(codePoint).toUpperCase();
   }
 
   private indexOfKey(entries: Array<ChatEntryModel>, key: string): number {

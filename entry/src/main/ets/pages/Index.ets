@@ -29,6 +29,7 @@ import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
 import { ChatPanel } from '../components/ChatPanel';
 import { ChatAvatar } from '../components/ChatAvatar';
+import { SearchIcon } from '../components/Icons';
 
 /** 认证状态 → 中文提示（M2 复审建议：技术串不直出用户 UI） */
 class AuthStateTextMap {
@@ -700,11 +701,9 @@ struct Index {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Text('🔍')
-            .fontSize(18)
+          SearchIcon({ iconSize: 18, iconColor: ChatUi.TEXT_PRIMARY })
             .width(32)
             .height(32)
-            .textAlign(TextAlign.Center)
             .onClick((): void => {
               this.chatSearchOpen = !this.chatSearchOpen;
             })
