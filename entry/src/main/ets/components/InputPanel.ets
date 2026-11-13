@@ -9,6 +9,7 @@
 import { ChatUi } from '../pages/ChatUi';
 import { EmojiData, EmojiCategory } from './EmojiData';
 import { StickerStore } from '../core/StickerStore';
+import { TdType } from '../core/TdConstants';
 import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { CloseIcon } from './Icons';
 import { StickerCell } from './StickerCell';
@@ -36,6 +37,9 @@ export struct InputPanel {
   /** 贴纸选中回调（ChatPanel：sendSticker） */
   onStickerPick: (sticker: Record<string, Object>) => void = (sticker: Record<string, Object>): void => {
   };
+  /** GIF 选中回调（ChatPanel：sendAnimation） */
+  onGifPick: (sticker: Record<string, Object>) => void = (sticker: Record<string, Object>): void => {
+  };
 
   @State activeCategory: number = 0;
   @State activeTab: string = PanelKind.EMOJI;
@@ -46,7 +50,7 @@ export struct InputPanel {
       Row({ space: 4 }) {
         this.tabButton('表情', PanelKind.EMOJI, true)
         this.tabButton('贴纸', PanelKind.STICKER, true)
-        this.tabButton('GIF', PanelKind.GIF, false)
+        this.tabButton('GIF', PanelKind.GIF, true)
         Blank()
         CloseIcon({ iconSize: 14, iconColor: ChatUi.TEXT_SECONDARY })
           .width(32)
@@ -70,16 +74,7 @@ export struct InputPanel {
       } else if (this.activeTab === PanelKind.STICKER) {
         this.stickerPanel()
       } else {
-        // A3 占位：GIF tab 待启用
-        Column() {
-          Text('GIF 面板即将推出')
-            .fontSize(13)
-            .fontColor(ChatUi.TEXT_SECONDARY)
-            .opacity(0.7)
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
+        this.gifPanel()
       }
     }
     .width('100%')
@@ -234,6 +229,54 @@ export struct InputPanel {
     }
     .width('100%')
     .layoutWeight(1)
+  }
+
+  /** GIF tab：最近 webm 动画贴纸网格（1.8.63 无 savedGifs——GIF 已并入动画贴纸） */
+  @Builder
+  gifPanel() {
+    Column() {
+      if (this.recentGifs().length === 0) {
+        Column() {
+          Text('发过 GIF 后会显示在这里')
+            .fontSize(13)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .opacity(0.7)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+      } else {
+        Grid() {
+          ForEach(this.recentGifs(), (sticker: Record<string, Object>) => {
+            GridItem() {
+              StickerCell({ sticker: sticker, cellSize: 96, round: false })
+                .onClick((): void => {
+                  this.onGifPick(sticker);
+                })
+            }
+          }, (sticker: Record<string, Object>) => `${InputPanel.stickerKey(sticker)}_g${this.stickerVersion}`)
+        }
+        .columnsTemplate('1fr 1fr 1fr')
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Auto)
+        .cachedCount(4)
+      }
+    }
+    .width('100%')
+    .layoutWeight(1)
+  }
+
+  /** 最近动画（webm）过滤 */
+  private recentGifs(): Array<Record<string, Object>> {
+    const all: Array<Record<string, Object>> = StickerStore.getInstance().getRecent();
+    const gifs: Array<Record<string, Object>> = new Array<Record<string, Object>>();
+    for (const sticker of all) {
+      if (StickerStore.readString(sticker, 'format') === TdType.STICKER_FORMAT_WEBM) {
+        gifs.push(sticker);
+      }
+    }
+    return gifs;
   }
 
   /** 网格 key：sticker.sticker.id（int32 file id，数字唯一） */

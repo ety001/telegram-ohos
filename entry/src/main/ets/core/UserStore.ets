@@ -206,6 +206,31 @@ export class UserStore {
     return `${then.getMonth() + 1}月${then.getDate()}日`;
   }
 
+  /**
+   * 用户名（@mention 补全用）：user.usernames.active_usernames[0]——1.8.63 schema 无平铺
+   * username 字段（旧版已改数组结构）；无缓存/无用户名返回空串（ensureUser 由调用方触发）。
+   */
+  usernameOf(userId: number): string {
+    const user: Record<string, Object> | undefined = this.users.get(userId);
+    if (user === undefined) {
+      return '';
+    }
+    const usernames: Record<string, Object> | null = this.asRecord(user[TdField.USERNAMES]);
+    if (usernames === null) {
+      return '';
+    }
+    const active: Object | undefined = usernames[TdField.ACTIVE_USERNAMES];
+    if (!Array.isArray(active)) {
+      return '';
+    }
+    const arr: Array<Object> = active as Array<Object>;
+    if (arr.length === 0) {
+      return '';
+    }
+    const first: Object | undefined = arr[0];
+    return typeof first === 'string' ? first : '';
+  }
+
   /** 展示名（first+last；无缓存空串） */
   displayName(userId: number): string {
     const user: Record<string, Object> | undefined = this.users.get(userId);

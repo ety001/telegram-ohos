@@ -21,7 +21,7 @@
  */
 import { MessageStore, MessageStoreObserver } from '../core/MessageStore';
 import { TimeFormat } from '../core/TimeFormat';
-import { TdField, TdMessageContent, TdSendingState, TdType } from '../core/TdConstants';
+import { TdField, TdMessageContent, TdSendingState, TdType, TdReq } from '../core/TdConstants';
 import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
@@ -41,6 +41,8 @@ import { ForwardPicker } from './ForwardPicker';
 import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon } from './Icons';
 import { InputPanel, PanelKind } from './InputPanel';
 import { StickerStore } from '../core/StickerStore';
+import { TdClient } from '../tdlib/TdClient';
+import { TdUpdateRouter } from '../core/TdUpdateRouter';
 import { fileUri } from '@kit.CoreFileKit';
 
 /** 全屏媒体覆盖层类型（'' = 关闭） */
@@ -117,6 +119,12 @@ export struct ChatPanel {
   private searchSeq: number = 0;
   // 输入面板（M7-A1）：'' = 关闭；emoji/贴纸/GIF（A2/A3 扩展）
   @Link panelKind: string;
+  // @mention 补全（M7-A3）：命中成员并行数组（userId/name/username）
+  @State mentionUserIds: Array<number> = [];
+  @State mentionNames: Array<string> = [];
+  @State mentionUsernames: Array<string> = [];
+  private mentionTimer: number = -1;
+  private mentionSeq: number = 0;
   // 跳转高亮（M6-2）：目标消息 id + 到期时间戳（setTimeout 清除）
   @State highlightMessageId: number = 0;
   private highlightTimer: number = -1;
@@ -158,6 +166,10 @@ export struct ChatPanel {
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
     UserStore.getInstance().removeObserver(this.userObserver);
+    if (this.mentionTimer >= 0) {
+      clearTimeout(this.mentionTimer); // 销毁清防抖（PR26 审计 P2-2：孤儿请求）
+      this.mentionTimer = -1;
+    }
     if (this.activatedChatId !== 0) {
       // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）。
       // PR13 审计 P1-1：登出流程 reset 先行、组件后拆卸——此时登录态已离开 ready，
@@ -208,6 +220,7 @@ export struct ChatPanel {
     this.overlayKind = OverlayKind.NONE;
     this.panelKind = PanelKind.NONE;
     this.pendingJumpId = 0;
+    this.clearMentions();
     // 搜索态归零（M6-5）：结果与输入属旧会话
     this.searchQuery = '';
     this.searchHits = [];
@@ -295,6 +308,37 @@ export struct ChatPanel {
           this.firstVisibleIndex = first;
         })
       }
+      // @mention 补全浮层（M7-A3）：输入区上方，≤6 条
+      if (this.mentionUserIds.length > 0) {
+        Column() {
+          ForEach(this.mentionUserIds, (userId: number, index: number) => {
+            Row({ space: 8 }) {
+              Circle({ width: 28, height: 28 })
+                .fill(ChatUi.avatarColor(userId))
+              Text(this.mentionNames[index])
+                .fontSize(14)
+                .fontColor(ChatUi.TEXT_PRIMARY)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              Text(`@${this.mentionUsernames[index]}`)
+                .fontSize(12)
+                .fontColor(ChatUi.ACCENT)
+            }
+            .width('100%')
+            .height(40)
+            .padding({ left: 12, right: 12 })
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => {
+              this.insertMention(index);
+            })
+          }, (userId: number, index: number) => `${userId}_${index}_${this.mentionUsernames[index]}`)
+        }
+        .width('100%')
+        .constraintSize({ maxHeight: 180 })
+        .backgroundColor(ChatUi.LIST_BG)
+        .border({ width: { top: 0.5 }, color: ChatUi.SEARCH_BG })
+      }
       if (this.panelKind !== PanelKind.NONE) {
         InputPanel({
           panelKind: $panelKind,
@@ -303,6 +347,9 @@ export struct ChatPanel {
           },
           onStickerPick: (sticker: Record<string, Object>): void => {
             MessageStore.getInstance().sendSticker(this.chatId, sticker);
+          },
+          onGifPick: (sticker: Record<string, Object>): void => {
+            MessageStore.getInstance().sendAnimation(this.chatId, sticker);
           },
           onClose: (): void => {
             this.closePanel();
@@ -675,6 +722,7 @@ export struct ChatPanel {
             if (this.panelKind !== PanelKind.NONE && value.length > 0) {
               this.panelKind = PanelKind.NONE;
             }
+            this.detectMention(value);
           })
           .onKeyEvent((event: KeyEvent): void => {
             // Ctrl+Enter 发送（桌面键盘；Enter 本身换行不拦截）
@@ -772,6 +820,7 @@ export struct ChatPanel {
     MessageStore.getInstance().sendText(this.chatId, text, this.replyToMessageId);
     // 守卫旧文本防发送清空后的 IME 回声（PR13 审计 P1-2）
     this.applyProgrammaticInput('');
+    this.clearMentions(); // 发送后浮层残留+空输入误插防护（PR26 审计 P2-1）
     // 发送成功即清本地草稿（云端草稿由 sendText 的 clear_draft 顺带清理）与回复模式
     DraftStore.getInstance().clear(this.chatId);
     this.replyToMessageId = 0;
@@ -837,6 +886,123 @@ export struct ChatPanel {
   private openForwardPicker(messageId: number): void {
     this.forwardMessageId = messageId;
     this.overlayKind = OverlayKind.FORWARD;
+  }
+
+  // ---------------- @mention 补全（M7-A3） ----------------
+
+  /** 检测输入尾部 @关键词（≥1 字符；仅群聊；私聊无提及语义） */
+  private detectMention(value: string): void {
+    if (this.mentionTimer >= 0) {
+      clearTimeout(this.mentionTimer);
+      this.mentionTimer = -1;
+    }
+    const at: number = value.lastIndexOf('@');
+    const group: boolean = this.chatId !== 0 && !ChatListStore.getInstance().isPrivateChat(this.chatId);
+    if (at < 0 || at === value.length - 1 || !group) {
+      this.clearMentions();
+      return;
+    }
+    const keyword: string = value.slice(at + 1);
+    if (keyword.indexOf(' ') >= 0 || keyword.length > 20) {
+      this.clearMentions();
+      return;
+    }
+    this.mentionTimer = setTimeout((): void => {
+      this.mentionTimer = -1;
+      this.refreshMentions(keyword);
+    }, 250);
+  }
+
+  private clearMentions(): void {
+    if (this.mentionTimer >= 0) {
+      clearTimeout(this.mentionTimer); // 切会话清防抖（PR26 审计 P2-2：串台）
+      this.mentionTimer = -1;
+    }
+    this.mentionSeq += 1; // 在途请求作废
+    this.mentionUserIds = [];
+    this.mentionNames = [];
+    this.mentionUsernames = [];
+  }
+
+  /** 防抖查询：searchChatMembers(chatMembersFilterMention) → 命中 ≤6 */
+  private refreshMentions(keyword: string): void {
+    if (this.chatId === 0) {
+      return;
+    }
+    this.mentionSeq += 1;
+    const seq: number = this.mentionSeq;
+    const extra: string = `mention_${this.mentionSeq}`;
+    TdUpdateRouter.getInstance().waitForExtra(extra, 10000)
+      .then((update: Record<string, Object>): void => {
+        if (seq !== this.mentionSeq) {
+          return; // 迟到响应丢弃
+        }
+        const typeObj: Object | undefined = update['@type'];
+        if (typeObj !== TdType.RESULT_CHAT_MEMBERS) {
+          return;
+        }
+        const membersObj: Object | undefined = update[TdField.MEMBERS];
+        const ids: Array<number> = [];
+        const names: Array<string> = [];
+        const usernames: Array<string> = [];
+        if (Array.isArray(membersObj)) {
+          const members: Array<Object> = membersObj as Array<Object>;
+          for (const item of members) {
+            if (ids.length >= 6) {
+              break;
+            }
+            const member: Record<string, Object> | null = ChatPanel.asRecord(item);
+            if (member === null) {
+              continue;
+            }
+            const sender: Record<string, Object> | null = ChatPanel.asRecord(member[TdField.MEMBER_ID]);
+            if (sender === null || sender['@type'] !== TdType.MESSAGE_SENDER_USER) {
+              continue;
+            }
+            const uid: number = ChatPanel.readNumber(sender, TdField.USER_ID);
+            if (uid === 0) {
+              continue;
+            }
+            const username: string = UserStore.getInstance().usernameOf(uid);
+            if (username.length === 0) {
+              UserStore.getInstance().ensureUser(uid); // 异步补齐，下一轮命中
+              continue;
+            }
+            const name: string = UserStore.getInstance().displayName(uid);
+            ids.push(uid);
+            names.push(name.length > 0 ? name : `@${username}`);
+            usernames.push(username);
+          }
+        }
+        this.mentionUserIds = ids;
+        this.mentionNames = names;
+        this.mentionUsernames = usernames;
+      })
+      .catch((reason: string): void => {
+        // 超时静默
+      });
+    const filter: Record<string, Object> = { ['@type']: TdType.CHAT_MEMBERS_FILTER_MENTION };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEARCH_CHAT_MEMBERS,
+      'chat_id': this.chatId,
+      'query': keyword,
+      'limit': 6,
+      'filter': filter
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+  }
+
+  /** 插入 @username（v1 追加末尾 + 空格；光标处插入挂已知限制） */
+  private insertMention(index: number): void {
+    if (index < 0 || index >= this.mentionUsernames.length) {
+      return;
+    }
+    const username: string = this.mentionUsernames[index];
+    const next: string = this.inputText.slice(0, this.inputText.lastIndexOf('@')) +
+      `@${username} `;
+    this.applyProgrammaticInput(next);
+    this.clearMentions();
   }
 
   /** 面板开关（M7-A1）：展开时收起软键盘（focusController 清焦，失败静默） */
