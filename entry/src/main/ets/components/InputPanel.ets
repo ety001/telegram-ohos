@@ -9,6 +9,7 @@
 import { ChatUi } from '../pages/ChatUi';
 import { EmojiData, EmojiCategory } from './EmojiData';
 import { StickerStore } from '../core/StickerStore';
+import { TdType } from '../core/TdConstants';
 import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { CloseIcon } from './Icons';
 import { StickerCell } from './StickerCell';
@@ -271,7 +272,7 @@ export struct InputPanel {
     const all: Array<Record<string, Object>> = StickerStore.getInstance().getRecent();
     const gifs: Array<Record<string, Object>> = new Array<Record<string, Object>>();
     for (const sticker of all) {
-      if (StickerStore.readString(sticker, 'format') === 'stickerFormatWebm') {
+      if (StickerStore.readString(sticker, 'format') === TdType.STICKER_FORMAT_WEBM) {
         gifs.push(sticker);
       }
     }

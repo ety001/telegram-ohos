@@ -166,6 +166,10 @@ export struct ChatPanel {
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
     UserStore.getInstance().removeObserver(this.userObserver);
+    if (this.mentionTimer >= 0) {
+      clearTimeout(this.mentionTimer); // 销毁清防抖（PR26 审计 P2-2：孤儿请求）
+      this.mentionTimer = -1;
+    }
     if (this.activatedChatId !== 0) {
       // 组件销毁（sm 返回）前保存当前输入为本地草稿（M6-1）。
       // PR13 审计 P1-1：登出流程 reset 先行、组件后拆卸——此时登录态已离开 ready，
@@ -816,6 +820,7 @@ export struct ChatPanel {
     MessageStore.getInstance().sendText(this.chatId, text, this.replyToMessageId);
     // 守卫旧文本防发送清空后的 IME 回声（PR13 审计 P1-2）
     this.applyProgrammaticInput('');
+    this.clearMentions(); // 发送后浮层残留+空输入误插防护（PR26 审计 P2-1）
     // 发送成功即清本地草稿（云端草稿由 sendText 的 clear_draft 顺带清理）与回复模式
     DraftStore.getInstance().clear(this.chatId);
     this.replyToMessageId = 0;
@@ -909,6 +914,11 @@ export struct ChatPanel {
   }
 
   private clearMentions(): void {
+    if (this.mentionTimer >= 0) {
+      clearTimeout(this.mentionTimer); // 切会话清防抖（PR26 审计 P2-2：串台）
+      this.mentionTimer = -1;
+    }
+    this.mentionSeq += 1; // 在途请求作废
     this.mentionUserIds = [];
     this.mentionNames = [];
     this.mentionUsernames = [];
