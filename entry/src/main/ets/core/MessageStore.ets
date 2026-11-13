@@ -285,6 +285,88 @@ export class MessageStore {
     hilog.info(LOG_DOMAIN, TAG, 'sendSticker: chat=%{public}s fileId=%{public}d', `${chatId}`, fileId);
   }
 
+  /**
+   * 发送 GIF/动画（M7-A3）：1.8.63 无 savedGifs（GIF 已并入 webm 动画贴纸），
+   * 入参为 recent stickers 中的 webm 项 → inputMessageAnimation{animation:inputFileId{id}}。
+   * duration 传 0（TDLib 自文件探测）；乐观占位 '[GIF]'（updateMessageContent 到达刷新）。
+   */
+  sendAnimation(chatId: number, sticker: Record<string, Object>): void {
+    if (chatId === 0 || !this.started) {
+      return;
+    }
+    const width: number = this.readNumberOr(sticker, TdField.WIDTH, 512);
+    const height: number = this.readNumberOr(sticker, TdField.HEIGHT, 512);
+    const stickerFile: Record<string, Object> | null = this.asRecord(sticker[TdField.STICKER]);
+    const fileId: number = stickerFile === null ? 0 : this.readNumberOr(stickerFile, TdField.ID, 0);
+    if (fileId === 0) {
+      return;
+    }
+    this.localIdSeq += 1;
+    const localId: number = LOCAL_ID_BASE - this.localIdSeq;
+    const placeholderContent: Record<string, Object> = {
+      ['@type']: TdMessageContent.ANIMATION,
+      'animation': { ['@type']: 'animation', 'width': width, 'height': height } as Record<string, Object>
+    };
+    const sendingState: Record<string, Object> = { ['@type']: TdSendingState.PENDING };
+    const placeholder: Record<string, Object> = {
+      'id': localId,
+      'chat_id': chatId,
+      'is_outgoing': true,
+      'date': Math.floor(Date.now() / 1000),
+      'content': placeholderContent,
+      'sending_state': sendingState
+    };
+    const cache: ChatMessageCache = this.ensureCache(chatId);
+    this.insertMessage(cache, placeholder);
+
+    this.actionSeq += 1;
+    const extra: string = `sendAnimation_${this.actionSeq}`;
+    const pending: PendingSend = { chatId: chatId, localId: localId, text: '[GIF]' };
+    this.pendingSends.set(extra, pending);
+    TdUpdateRouter.getInstance().waitForExtra(extra, SEND_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        this.pendingSends.delete(extra);
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+        if (type === ErrorType.INVALID) {
+          this.markPlaceholderFailed(chatId, localId, '发送失败');
+          this.notifyChanged(chatId);
+          return;
+        }
+        const live: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (live === undefined) {
+          return;
+        }
+        this.removeById(live, localId);
+        const tempMessage: Record<string, Object> | null = this.asRecord(update);
+        if (tempMessage !== null) {
+          this.insertMessage(live, tempMessage);
+        }
+        this.notifyChanged(chatId);
+      })
+      .catch((reason: string): void => {
+        this.pendingSends.delete(extra);
+        this.markPlaceholderFailed(chatId, localId, '发送超时');
+        this.notifyChanged(chatId);
+      });
+    const animationInput: Record<string, Object> = { ['@type']: 'inputFileId', 'id': fileId };
+    const inputContent: Record<string, Object> = {
+      ['@type']: 'inputMessageAnimation',
+      'animation': animationInput,
+      'duration': 0,
+      'width': width,
+      'height': height
+    };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEND_MESSAGE,
+      'chat_id': chatId,
+      'input_message_content': inputContent
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    hilog.info(LOG_DOMAIN, TAG, 'sendAnimation: chat=%{public}s fileId=%{public}d', `${chatId}`, fileId);
+  }
+
   /** 字段读取兜底（缺失回默认值） */
   private readNumberOr(source: Record<string, Object>, field: string, fallback: number): number {
     const value: number = this.readNumber(source, field);

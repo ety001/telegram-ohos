@@ -79,6 +79,9 @@ export class TdReq {
   static readonly GET_STICKER_SET: string = 'getStickerSet';
   // 1.8.63 schema：getRecentStickers(is_attached:Bool) = Stickers
   static readonly GET_RECENT_STICKERS: string = 'getRecentStickers';
+  // @mention 补全（M7-A3）
+  // 1.8.63 schema：searchChatMembers(chat_id, query, limit, filter:ChatMembersFilter) = ChatMembers
+  static readonly SEARCH_CHAT_MEMBERS: string = 'searchChatMembers';
 }
 
 export class TdUpdate {
@@ -218,6 +221,7 @@ export class TdType {
   static readonly RESULT_STICKERS: string = 'stickers';
   // @mention 补全（M7-A3；chatMembersFilterMention 专用可提及成员查询）
   static readonly CHAT_MEMBERS_FILTER_MENTION: string = 'chatMembersFilterMention';
+  static readonly RESULT_CHAT_MEMBERS: string = 'chatMembers';
   // 贴纸格式（M6-7；sticker.format:StickerFormat 判别——webp 静态可直渲，tgs/webm 动效挂 M7）
   static readonly STICKER_FORMAT_WEBP: string = 'stickerFormatWebp';
   static readonly STICKER_FORMAT_TGS: string = 'stickerFormatTgs';
@@ -316,6 +320,11 @@ export class TdField {
   static readonly COVERS: string = 'covers';
   static readonly STICKERS: string = 'stickers';
   static readonly STICKER_TYPE: string = 'sticker_type';
+  // @mention（M7-A3；chatMembers/user.usernames 结构字段）
+  static readonly MEMBERS: string = 'members';
+  static readonly MEMBER_ID: string = 'member_id';
+  static readonly USERNAMES: string = 'usernames';
+  static readonly ACTIVE_USERNAMES: string = 'active_usernames';
   static readonly FIRST_NAME: string = 'first_name';
   static readonly LAST_NAME: string = 'last_name';
   static readonly EXPIRES: string = 'expires';
