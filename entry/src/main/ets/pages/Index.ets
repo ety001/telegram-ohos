@@ -74,7 +74,7 @@ const TD_STATUS_ERROR: string = 'TDLib 未连通（td_execute 不可用）';
 // 布局尺寸（单位：vp）
 const NAV_RAIL_WIDTH: number = 60;
 const CHAT_LIST_WIDTH: number = 300;
-const ROW_HEIGHT: number = 64;
+const ROW_HEIGHT: number = 62; // tdesktop dialogs row height
 const AVATAR_SIZE: number = 46;
 
 const PAGE_CREDENTIALS: string = 'pages/CredentialsPage';
@@ -450,7 +450,7 @@ struct Index {
         .bindMenu(this.settingsMenu())
     }
     .width('100%')
-    .height(52)
+    .height(54)
     .padding({ left: 16, right: 10 })
     .alignItems(VerticalAlign.Center)
   }
@@ -611,15 +611,16 @@ struct Index {
           }
           if (item.unreadText.length > 0) {
             Text(item.unreadText)
-              .fontSize(11)
+              .fontSize(12)
+              .fontWeight(FontWeight.Bold)
               .fontColor('#FFFFFF')
-              .constraintSize({ minWidth: 20 })
-              .height(20)
-              .borderRadius(10)
+              .constraintSize({ minWidth: 19 })
+              .height(19)
+              .borderRadius(9.5)
               .textAlign(TextAlign.Center)
-              .padding({ left: 6, right: 6 })
-              // 静音会话未读角标置灰（Telegram 语义：不提醒的未读）
-              .backgroundColor(item.muted ? ChatUi.TEXT_SECONDARY : ChatUi.BADGE_BG)
+              .padding({ left: 5, right: 5 })
+              // 静音会话未读角标置灰（官方 dialogsUnreadBgMuted #3e546a）
+              .backgroundColor(item.muted ? ChatUi.BADGE_MUTED_BG : ChatUi.BADGE_BG)
               .margin({ left: 8 })
           }
         }
@@ -709,7 +710,7 @@ struct Index {
             })
         }
         .width('100%')
-        .height(52)
+        .height(54)
         .padding({ left: 16, right: 16 })
         .alignItems(VerticalAlign.Center)
         .backgroundColor(ChatUi.LIST_BG)
