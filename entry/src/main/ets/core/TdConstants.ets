@@ -82,6 +82,16 @@ export class TdReq {
   // @mention 补全（M7-A3）
   // 1.8.63 schema：searchChatMembers(chat_id, query, limit, filter:ChatMembersFilter) = ChatMembers
   static readonly SEARCH_CHAT_MEMBERS: string = 'searchChatMembers';
+  // reactions（M7-D1）
+  // 1.8.63 schema：addMessageReaction(chat_id, message_id, reaction_type:ReactionType, is_big, update_recent_reactions) = Ok
+  static readonly ADD_MESSAGE_REACTION: string = 'addMessageReaction';
+  // 1.8.63 schema：removeMessageReaction(chat_id, message_id, reaction_type:ReactionType) = Ok
+  static readonly REMOVE_MESSAGE_REACTION: string = 'removeMessageReaction';
+  // 置顶消息（M7-D2）
+  // 1.8.63 schema：pinChatMessage(chat_id, message_id, disable_notification, only_for_self) = Ok
+  static readonly PIN_CHAT_MESSAGE: string = 'pinChatMessage';
+  // 1.8.63 schema：unpinChatMessage(chat_id, message_id) = Ok
+  static readonly UNPIN_CHAT_MESSAGE: string = 'unpinChatMessage';
 }
 
 export class TdUpdate {
@@ -113,6 +123,8 @@ export class TdUpdate {
   // 消息被编辑（M6-3；1.8.63 schema：{chat_id, message_id, edit_date, reply_markup}——
   // edit_date 经此更新下发，与 updateMessageContent 分离，漏注册会导致「已编辑」标记永不出现）
   static readonly MESSAGE_EDITED: string = 'updateMessageEdited';
+  // reactions 变更（M7-D1；{chat_id, message_id, date, reactions:vector<messageReaction>}）
+  static readonly MESSAGE_REACTIONS: string = 'updateMessageReactions';
   static readonly CHAT_READ_OUTBOX: string = 'updateChatReadOutbox';
   // getChatHistory 的结果对象（@type=messages，含完整 message 数组；与 update 走同一分发入口）
   static readonly MESSAGES: string = 'messages';
@@ -211,6 +223,10 @@ export class TdType {
   // 消息发送者（UI 打磨：message.sender_id:messageSenderUser{user_id}，群聊昵称/分组键）
   static readonly MESSAGE_SENDER_USER: string = 'messageSenderUser';
   static readonly MESSAGE_SENDER_CHAT: string = 'messageSenderChat';
+  // reactions（M7-D1；ReactionType 判别与 chat 可用集判别）
+  static readonly REACTION_TYPE_EMOJI: string = 'reactionTypeEmoji';
+  static readonly CHAT_AVAILABLE_ALL: string = 'chatAvailableReactionsAll';
+  static readonly CHAT_AVAILABLE_SOME: string = 'chatAvailableReactionsSome';
   // 会话内搜索（M6-5；foundChatMessages 结果对象 / 过滤器空集）
   static readonly FOUND_CHAT_MESSAGES: string = 'foundChatMessages';
   static readonly SEARCH_MESSAGES_FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
@@ -330,6 +346,18 @@ export class TdField {
   static readonly MEMBERS: string = 'members';
   static readonly MEMBER_ID: string = 'member_id';
   static readonly NEXT_FROM_MESSAGE_ID: string = 'next_from_message_id';
+  // reactions/置顶（M7-D1/D2；message.interaction_info 链字段）
+  static readonly INTERACTION_INFO: string = 'interaction_info';
+  static readonly REACTIONS: string = 'reactions';
+  static readonly TOTAL_COUNT: string = 'total_count';
+  static readonly IS_CHOSEN: string = 'is_chosen';
+  static readonly AVAILABLE_REACTIONS: string = 'available_reactions';
+  static readonly MAX_REACTION_COUNT: string = 'max_reaction_count';
+  static readonly IS_BIG: string = 'is_big';
+  static readonly UPDATE_RECENT_REACTIONS: string = 'update_recent_reactions';
+  static readonly REACTION_TYPE: string = 'reaction_type';
+  static readonly DISABLE_NOTIFICATION: string = 'disable_notification';
+  static readonly ONLY_FOR_SELF: string = 'only_for_self';
   static readonly USERNAMES: string = 'usernames';
   static readonly ACTIVE_USERNAMES: string = 'active_usernames';
   static readonly FIRST_NAME: string = 'first_name';

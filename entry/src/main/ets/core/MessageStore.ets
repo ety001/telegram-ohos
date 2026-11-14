@@ -378,6 +378,45 @@ export class MessageStore {
     return typeof value === 'string' ? value : '';
   }
 
+  /**
+   * 设置/切换 reaction（M7-D1）：emoji 非空=add（官方自动切换同消息已有反应），
+   * 空串=remove（移除自己的）。结果经 updateMessageReactions 驱动刷新。
+   */
+  setReaction(chatId: number, messageId: number, emoji: string): void {
+    if (chatId === 0 || messageId <= 0 || !this.started) {
+      return;
+    }
+    if (emoji.length === 0) {
+      // 移除需提供 reaction_type——由调用方传当前 chosen emoji（见 ChatPanel.onReactionTap）
+      return;
+    }
+    const reactionType: Record<string, Object> = { ['@type']: TdType.REACTION_TYPE_EMOJI, 'emoji': emoji };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.ADD_MESSAGE_REACTION,
+      'chat_id': chatId,
+      'message_id': messageId,
+      'reaction_type': reactionType,
+      'is_big': false,
+      'update_recent_reactions': true
+    };
+    TdClient.getInstance().send(request);
+  }
+
+  /** 移除自己的 reaction（M7-D1） */
+  removeReaction(chatId: number, messageId: number, emoji: string): void {
+    if (chatId === 0 || messageId <= 0 || emoji.length === 0 || !this.started) {
+      return;
+    }
+    const reactionType: Record<string, Object> = { ['@type']: TdType.REACTION_TYPE_EMOJI, 'emoji': emoji };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.REMOVE_MESSAGE_REACTION,
+      'chat_id': chatId,
+      'message_id': messageId,
+      'reaction_type': reactionType
+    };
+    TdClient.getInstance().send(request);
+  }
+
   /** 语音已听上报（M6-6）：openMessageContent——is_listened 由 updateMessageContent 刷新 */
   reportListened(chatId: number, messageId: number): void {
     if (chatId === 0 || messageId <= 0 || !this.started) {
@@ -406,6 +445,30 @@ export class MessageStore {
     this.notifyChanged(chatId);
   };
 
+  // reactions 变更（M7-D1）：interaction_info.reactions 写回缓存消息并通知重建
+  private readonly onMessageReactions: TdRouteHandler = (update: Record<string, Object>): void => {
+    const chatId: number = this.readChatId(update);
+    const cache: ChatMessageCache | undefined = this.caches.get(chatId);
+    if (cache === undefined) {
+      return;
+    }
+    const messageId: number = this.readNumber(update, TdField.MESSAGE_ID);
+    const message: Record<string, Object> | undefined = this.findById(cache, messageId);
+    if (message === undefined) {
+      return;
+    }
+    const reactions: Object | undefined = update[TdField.REACTIONS];
+    const info: Record<string, Object> = message[TdField.INTERACTION_INFO] !== null &&
+      typeof message[TdField.INTERACTION_INFO] === 'object' &&
+      !Array.isArray(message[TdField.INTERACTION_INFO])
+      ? message[TdField.INTERACTION_INFO] as Record<string, Object>
+      : { ['@type']: 'messageInteractionInfo' };
+    const wrapper: Record<string, Object> = { ['@type']: 'messageReactions', 'reactions': reactions };
+    info[TdField.REACTIONS] = wrapper;
+    message[TdField.INTERACTION_INFO] = info;
+    this.notifyChanged(chatId);
+  };
+
   /** 登录就绪后触发（幂等）：挂路由。由 Index 会话仓库生命周期同步调用 */
   start(): void {
     if (this.started) {
@@ -420,6 +483,7 @@ export class MessageStore {
     router.register(TdUpdate.DELETE_MESSAGES, this.onDeleteMessages);
     router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
     router.register(TdUpdate.MESSAGE_EDITED, this.onMessageEdited);
+    router.register(TdUpdate.MESSAGE_REACTIONS, this.onMessageReactions);
     hilog.info(LOG_DOMAIN, TAG, 'started');
   }
 
