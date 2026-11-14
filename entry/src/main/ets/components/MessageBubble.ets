@@ -368,7 +368,7 @@ export struct MessageBubble {
             .commands(this.model.isOutgoing ?
               'M6 0 L6 10 C3.2 9.2 0.6 6.8 0 2.4 L0 0 Z' : 'M0 0 L0 10 C2.8 9.2 5.4 6.8 6 2.4 L6 0 Z')
             .fill(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
-            .translate({ x: this.model.isOutgoing ? 5.6 : -5.6, y: -2 })
+            .translate({ x: this.model.isOutgoing ? 6 : -6, y: -2 })
         }
         Column() {
         // 群聊发送者昵称（组首着色，仅非私聊 + incoming + 组首）
@@ -517,18 +517,9 @@ export struct MessageBubble {
     const tail: boolean = this.tailVisible();
     const tl: number = !this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
     const tr: number = this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
-    const br: number = (this.model.isOutgoing && this.model.groupedWithNext) ||
-      (this.model.isOutgoing && tail) ? s : r;
-    const bl: number = (!this.model.isOutgoing && this.model.groupedWithNext) ||
-      (!this.model.isOutgoing && tail) ? s : r;
-    if (this.model.isOutgoing && tail) {
-      const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: 0, bottomLeft: bl };
-      return radius;
-    }
-    if (!this.model.isOutgoing && tail) {
-      const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: 0 };
-      return radius;
-    }
+    // 尾侧底角：有尾巴时归零（与尾图无缝衔接），否则组内相邻 6 / 组尾 16
+    const br: number = this.model.isOutgoing && (this.model.groupedWithNext ? s : (tail ? 0 : r));
+    const bl: number = !this.model.isOutgoing && (this.model.groupedWithNext ? s : (tail ? 0 : r));
     const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl };
     return radius;
   }
