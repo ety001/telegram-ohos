@@ -518,8 +518,8 @@ export struct MessageBubble {
     const tl: number = !this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
     const tr: number = this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
     // 尾侧底角：有尾巴时归零（与尾图无缝衔接），否则组内相邻 6 / 组尾 16
-    const br: number = this.model.isOutgoing && (this.model.groupedWithNext ? s : (tail ? 0 : r));
-    const bl: number = !this.model.isOutgoing && (this.model.groupedWithNext ? s : (tail ? 0 : r));
+    const br: number = this.model.isOutgoing ? (this.model.groupedWithNext ? s : (tail ? 0 : r)) : r;
+    const bl: number = !this.model.isOutgoing ? (this.model.groupedWithNext ? s : (tail ? 0 : r)) : r;
     const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl };
     return radius;
   }
