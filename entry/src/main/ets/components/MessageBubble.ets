@@ -174,6 +174,10 @@ export class MessageBubbleModel {
   /** 自己已选中的 emoji（chip 点击切换/移除判定） */
   myChosenEmoji: string = '';
 
+  // ---------------- 多选（M7-D3；ChatPanel.rebuild 回填，keySuffix 驱动重建） ----------------
+  selectionMode: boolean = false;
+  selected: boolean = false;
+
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
     // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）；
@@ -184,7 +188,8 @@ export class MessageBubbleModel {
       `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
       `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}_${this.stickerFileId}_${this.animFileId}` +
       `_${this.groupedWithPrev}_${this.groupedWithNext}_${this.senderName}_${this.senderColor}` +
-      `_${this.reactionEmojis.length}_${this.myChosenEmoji}_${this.reactionCounts.join('/')}`;
+      `_${this.reactionEmojis.length}_${this.myChosenEmoji}_${this.reactionCounts.join('/')}` +
+      `_${this.selectionMode}_${this.selected}`;
   }
 }
 
@@ -232,6 +237,16 @@ export struct MessageBubble {
   /** 置顶切换回调（M7-D2：宿主 pinChatMessage/unpinChatMessage + 重查置顶条） */
   onPinToggle: (messageId: number, pinned: boolean) => void =
     (messageId: number, pinned: boolean): void => {
+  };
+  /** 多选模式（M7-D3）：true 时气泡点击=切换选中，业务点击全部短路 */
+  selectionMode: boolean = false;
+  /** 本条是否已选中（多选模式勾选标记） */
+  selected: boolean = false;
+  /** 进入多选（从本条开始）回调（M7-D3） */
+  onEnterSelection: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** 多选切换回调（M7-D3） */
+  onToggleSelect: (messageId: number) => void = (messageId: number): void => {
   };
   /** reaction 增加/移除回调（M7-D1：宿主走 MessageStore.setReaction/removeReaction） */
   onReactionAdd: (messageId: number, emoji: string) => void =
@@ -385,6 +400,28 @@ export struct MessageBubble {
         this.senderAvatar()
       }
       Stack({ alignContent: this.model.isOutgoing ? Alignment.BottomEnd : Alignment.BottomStart }) {
+        // 多选勾选标记（M7-D3）：气泡左上角覆盖圈
+        if (this.selectionMode) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle({ width: 20, height: 20 })
+              .fill(this.selected ? ChatUi.ACCENT : '#30000000')
+              .stroke(this.selected ? ChatUi.ACCENT : '#AAFFFFFF')
+              .strokeWidth(1.5)
+            if (this.selected) {
+              Path()
+                .width(10)
+                .height(10)
+                .commands('M2 5.5 L4.5 8 L8.5 2.5')
+                .fillOpacity(0)
+                .stroke('#FFFFFF')
+                .strokeWidth(1.8)
+                .strokeLineCap(LineCapStyle.Round)
+            }
+          }
+          .width(20)
+          .height(20)
+          .translate({ x: -8, y: -8 })
+        }
         // 尾巴（M7-C1）：组尾 + 气泡型消息，sender 侧底角向外伸 6px（官方 bubble_tail 语义）
         if (this.tailVisible()) {
           Path()
@@ -450,6 +487,12 @@ export struct MessageBubble {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 0, bottom: 0 })
+    // 多选模式：行点击切换选中（M7-D3；内部业务点击已短路）
+    .onClick((): void => {
+      if (this.selectionMode && this.model.messageId > 0) {
+        this.onToggleSelect(this.model.messageId);
+      }
+    })
     // 悬停高亮（M7-C1）：PC 鼠标 Enter/Leave 行底色微亮（官方 message hover 语义）
     .onMouse((event: MouseEvent): void => {
       if (event.action === MouseAction.ENTER_WINDOW) {
@@ -667,6 +710,11 @@ export struct MessageBubble {
             this.copyToClipboard();
           })
       }
+      MenuItem({ content: '多选' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.onEnterSelection(this.model.messageId);
+        })
       MenuItem({ content: '删除' })
         .contentFontColor(ChatUi.BUBBLE_ERROR)
         .onClick((): void => {
@@ -1473,6 +1521,9 @@ export struct MessageBubble {
         return; // 链接切片点击已消费（见 linkClickConsumed 注释）
       }
       // 失败气泡点击 = 重试（其余点击无动作；长按菜单 M5）
+      if (this.selectionMode) {
+        return;
+      }
       if (this.model.sendState === BubbleSendState.FAILED && this.model.canRetry) {
         this.onRetry(this.model.messageId);
       }
@@ -1584,6 +1635,9 @@ export struct MessageBubble {
   // ---------------- 点击动作 ----------------
 
   private handlePhotoClick(): void {
+    if (this.selectionMode) {
+      return; // 多选模式业务点击短路（M7-D3）
+    }
     // FAILED 补救（M3-media 复审修复）：图片为自动预载，失败后无自愈路径——点击重拉一次
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     const fileId: number = this.model.photoFileId;
@@ -1599,6 +1653,9 @@ export struct MessageBubble {
   }
 
   private handleVideoClick(): void {
+    if (this.selectionMode) {
+      return;
+    }
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     const fileId: number = this.model.videoFileId;
     if (fileId === 0) {
@@ -1618,6 +1675,9 @@ export struct MessageBubble {
   }
 
   private handleDocumentClick(): void {
+    if (this.selectionMode) {
+      return;
+    }
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     const fileId: number = this.model.docFileId;
     if (fileId === 0) {

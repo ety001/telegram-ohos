@@ -111,8 +111,8 @@ export struct ChatPanel {
   private editIsCaption: boolean = false;
   /** 编辑 caption 时原消息 show_caption_above_media 透传（schema 必填） */
   private editShowAbove: boolean = false;
-  /** 转发源（M6-3）：待转发消息 id（ForwardPicker 选定目标后消费） */
-  private forwardMessageId: number = 0;
+  /** 转发源（M6-3/M7-D3）：待转发消息 id 列表（ForwardPicker 选定目标后消费） */
+  private forwardMessageIds: Array<number> = [];
   // 会话内搜索（M6-5）：@Link 由聊天区顶栏 🔍 开关（Index lg / ChatPage sm 双入口）
   @Link showSearch: boolean;
   @State searchQuery: string = '';
@@ -127,6 +127,9 @@ export struct ChatPanel {
   @Prop @Watch('onJumpRequestChanged') jumpRequest: number = 0;
   /** 当前会话置顶消息 id（0 无；气泡菜单判定，M7-D2；@Prop 随宿主刷新） */
   @Prop chatPinnedId: number = 0;
+  // 多选批量（M7-D3）：selectionMode 下气泡点击切换选中；底栏批量转发/删除
+  @State selectionMode: boolean = false;
+  @State selectedIds: Array<number> = [];
   // @mention 补全（M7-A3）：命中成员并行数组（userId/name/username）
   @State mentionUserIds: Array<number> = [];
   @State mentionNames: Array<string> = [];
@@ -233,11 +236,12 @@ export struct ChatPanel {
     this.editPreviewLabel = '';
     this.editIsCaption = false;
     this.editShowAbove = false;
-    this.forwardMessageId = 0;
+    this.forwardMessageIds = [];
     this.overlayKind = OverlayKind.NONE;
     this.panelKind = PanelKind.NONE;
     this.pendingJumpId = 0;
     this.clearMentions();
+    this.exitSelection();
     // 搜索态归零（M6-5）：结果与输入属旧会话
     this.searchQuery = '';
     this.searchHits = [];
@@ -282,6 +286,14 @@ export struct ChatPanel {
                 MessageBubble({
                   model: entry.bubble,
                   chatPinnedId: this.chatPinnedId,
+                  selectionMode: entry.bubble !== null ? entry.bubble.selectionMode : false,
+                  selected: entry.bubble !== null ? entry.bubble.selected : false,
+                  onEnterSelection: (messageId: number): void => {
+                    this.enterSelection(messageId);
+                  },
+                  onToggleSelect: (messageId: number): void => {
+                    this.toggleSelect(messageId);
+                  },
                   onRetry: (messageId: number): void => {
                     this.retryMessage(messageId);
                   },
@@ -304,7 +316,7 @@ export struct ChatPanel {
                     this.startEdit(messageId);
                   },
                   onForwardAction: (messageId: number): void => {
-                    this.openForwardPicker(messageId);
+                    this.openForwardPicker([messageId]);
                   },
                   onReactionPicker: (messageId: number): void => {
                     this.openReactionPicker(messageId);
@@ -387,7 +399,53 @@ export struct ChatPanel {
           }
         })
       }
-      this.inputBar()
+      if (this.selectionMode) {
+        // 批量操作条（M7-D3）：转发(N) / 删除(N) / 取消——替换输入区
+        Row({ space: 12 }) {
+          Text(`已选 ${this.selectedIds.length}`)
+            .fontSize(13)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .layoutWeight(1)
+          Text('取消')
+            .fontSize(14)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor(ChatUi.SEARCH_BG)
+            .onClick((): void => {
+              this.exitSelection();
+            })
+          Text('删除')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(ChatUi.BUBBLE_ERROR)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor(ChatUi.SEARCH_BG)
+            .opacity(this.selectedIds.length > 0 ? 1 : 0.4)
+            .onClick((): void => {
+              this.confirmDeleteSelected();
+            })
+          Text('转发')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFFFFF')
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor(ChatUi.ACCENT)
+            .opacity(this.selectedIds.length > 0 ? 1 : 0.4)
+            .onClick((): void => {
+              this.forwardSelected();
+            })
+        }
+        .width('100%')
+        .constraintSize({ minHeight: 60 })
+        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(ChatUi.LIST_BG)
+      } else {
+        this.inputBar()
+      }
     }
     .width('100%')
     .layoutWeight(1)
@@ -577,17 +635,18 @@ export struct ChatPanel {
     } else if (this.overlayKind === OverlayKind.FORWARD) {
       ForwardPicker({
         onPick: (chatId: number): void => {
-          const messageId: number = this.forwardMessageId;
+          const messageIds: Array<number> = this.forwardMessageIds;
           const fromChatId: number = this.chatId;
           this.closeOverlay();
-          this.forwardMessageId = 0;
-          if (chatId !== 0 && messageId !== 0) {
-            MessageStore.getInstance().forwardMessages(chatId, fromChatId, [messageId]);
+          this.forwardMessageIds = [];
+          this.exitSelection();
+          if (chatId !== 0 && messageIds.length > 0) {
+            MessageStore.getInstance().forwardMessages(chatId, fromChatId, messageIds);
           }
         },
         onClose: (): void => {
           this.closeOverlay();
-          this.forwardMessageId = 0;
+          this.forwardMessageIds = [];
         }
       })
     }
@@ -1007,10 +1066,83 @@ export struct ChatPanel {
     return defaults; // All/Default/未知 → 内置默认集
   }
 
-  /** 打开转发目标选择器（覆盖层内选定后 forwardMessages） */
-  private openForwardPicker(messageId: number): void {
-    this.forwardMessageId = messageId;
+  /** 打开转发目标选择器（覆盖层内选定后 forwardMessages；M7-D3 支持批量） */
+  private openForwardPicker(messageIds: Array<number>): void {
+    this.forwardMessageIds = messageIds;
     this.overlayKind = OverlayKind.FORWARD;
+  }
+
+  // ---------------- 多选批量（M7-D3） ----------------
+
+  /** 从一条消息进入多选模式（气泡菜单「多选」入口） */
+  private enterSelection(messageId: number): void {
+    if (messageId <= 0) {
+      return;
+    }
+    this.selectionMode = true;
+    this.selectedIds = [messageId];
+    this.rebuild();
+  }
+
+  /** 切换选中（仅正数服务端消息可勾选；乐观占位/失败态排除） */
+  private toggleSelect(messageId: number): void {
+    if (messageId <= 0) {
+      return;
+    }
+    const index: number = this.selectedIds.indexOf(messageId);
+    const next: Array<number> = this.selectedIds.slice();
+    if (index >= 0) {
+      next.splice(index, 1);
+    } else {
+      next.push(messageId);
+    }
+    this.selectedIds = next;
+    this.rebuild();
+  }
+
+  /** 退出多选（取消/转发完成/删除完成/切会话） */
+  private exitSelection(): void {
+    if (!this.selectionMode && this.selectedIds.length === 0) {
+      return;
+    }
+    this.selectionMode = false;
+    this.selectedIds = [];
+    this.rebuild();
+  }
+
+  /** 批量删除（沿单条 ActionMenu 三选语义；乐观移除由 MessageStore 承担） */
+  private confirmDeleteSelected(): void {
+    const ids: Array<number> = this.selectedIds.filter((id: number): boolean => id > 0);
+    if (ids.length === 0) {
+      return;
+    }
+    this.getUIContext().getPromptAction().showActionMenu({
+      title: `删除 ${ids.length} 条消息？`,
+      buttons: [
+        { text: '删除（所有人）', color: ChatUi.BUBBLE_ERROR },
+        { text: '删除（仅自己）', color: ChatUi.TEXT_PRIMARY },
+        { text: '取消', color: ChatUi.TEXT_SECONDARY }
+      ]
+    }).then((result: promptAction.ActionMenuSuccessResponse): void => {
+      if (result.index === 0) {
+        MessageStore.getInstance().deleteMessages(this.chatId, ids, true);
+        this.exitSelection();
+      } else if (result.index === 1) {
+        MessageStore.getInstance().deleteMessages(this.chatId, ids, false);
+        this.exitSelection();
+      }
+    }).catch((): void => {
+    });
+  }
+
+  /** 批量转发入口（关闭多选进入目标选择器） */
+  private forwardSelected(): void {
+    const ids: Array<number> = this.selectedIds.filter((id: number): boolean => id > 0);
+    if (ids.length === 0) {
+      return;
+    }
+    this.exitSelection();
+    this.openForwardPicker(ids);
   }
 
   // ---------------- @mention 补全（M7-A3） ----------------
@@ -1363,6 +1495,9 @@ export struct ChatPanel {
         lastDayKey = bubble.dayKey;
       }
       const item: ChatEntryModel = new ChatEntryModel();
+      // 多选标志（M7-D3）：回填进模型（keySuffix 含 selected/selectionMode，勾选变化驱动重建）
+      bubble.selectionMode = this.selectionMode;
+      bubble.selected = this.selectionMode && this.selectedIds.includes(bubble.messageId);
       item.key = `m${bubble.keySuffix()}`;
       item.bubble = bubble;
       entries.push(item);
