@@ -194,8 +194,8 @@ export struct MessageBubble {
   /** 失败气泡点击重试回调（ChatPanel 注入，调 MessageStore.retrySend） */
   onRetry: (messageId: number) => void = (messageId: number): void => {
   };
-  /** 图片全屏预览回调（src = data URI 或沙盒应用 URI） */
-  onPhotoOpen: (src: string) => void = (src: string): void => {
+  /** 图片全屏查看器回调（M7-B1：传消息 id，宿主组装多图清单并定位） */
+  onPhotoOpen: (messageId: number) => void = (messageId: number): void => {
   };
   /** 视频播放回调（localPath = TDLib 沙盒绝对路径，播放页 open fd 播放） */
   onVideoOpen: (localPath: string, title: string) => void = (localPath: string, title: string): void => {
@@ -1474,9 +1474,9 @@ export struct MessageBubble {
       this.refreshPhotoState();
       return;
     }
-    const src: string = this.photoReady && this.photoUri.length > 0 ? this.photoUri : this.model.photoMini;
-    if (src.length > 0) {
-      this.onPhotoOpen(src);
+    const hasSrc: boolean = (this.photoReady && this.photoUri.length > 0) || this.model.photoMini.length > 0;
+    if (hasSrc) {
+      this.onPhotoOpen(this.model.messageId);
     }
   }
 
