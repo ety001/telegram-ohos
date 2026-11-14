@@ -194,7 +194,7 @@ export struct MediaViewer {
       })
   }
 
-  /** 邻页预载：当前 PHOTO 优先、邻页 THUMBNAIL（缩略小图快速可看） */
+  /** 邻页预载：当前页与邻页同 PHOTO 优先级（气泡预载同档，FileDownloadStore 幂等去重） */
   private preloadAround(index: number): void {
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     const ranges: Array<[number, number]> = [

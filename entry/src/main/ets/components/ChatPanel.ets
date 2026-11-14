@@ -36,7 +36,7 @@ import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyCode } from '@kit.InputKit';
 import { promptAction } from '@kit.ArkUI';
-import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
+import { VideoPlayCover } from './MediaOverlays';
 import { MediaViewer, ViewerPhoto } from './MediaViewer';
 import { ForwardPicker } from './ForwardPicker';
 import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon } from './Icons';
