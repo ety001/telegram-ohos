@@ -184,7 +184,7 @@ export class MessageBubbleModel {
       `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
       `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}_${this.stickerFileId}_${this.animFileId}` +
       `_${this.groupedWithPrev}_${this.groupedWithNext}_${this.senderName}_${this.senderColor}` +
-      `_${this.reactionEmojis.length}_${this.myChosenEmoji}`;
+      `_${this.reactionEmojis.length}_${this.myChosenEmoji}_${this.reactionCounts.join('/')}`;
   }
 }
 

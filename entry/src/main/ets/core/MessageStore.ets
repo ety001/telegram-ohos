@@ -445,8 +445,9 @@ export class MessageStore {
     this.notifyChanged(chatId);
   };
 
-  // reactions 变更（M7-D1）：interaction_info.reactions 写回缓存消息并通知重建
-  private readonly onMessageReactions: TdRouteHandler = (update: Record<string, Object>): void => {
+  // 交互信息变更（M7-D1；PR30 审计 P0-A：updateMessageReactions 为 bot 专用，
+  // 用户端 reactions/计数变更整对象经 updateMessageInteractionInfo 下发）
+  private readonly onMessageInteractionInfo: TdRouteHandler = (update: Record<string, Object>): void => {
     const chatId: number = this.readChatId(update);
     const cache: ChatMessageCache | undefined = this.caches.get(chatId);
     if (cache === undefined) {
@@ -457,14 +458,10 @@ export class MessageStore {
     if (message === undefined) {
       return;
     }
-    const reactions: Object | undefined = update[TdField.REACTIONS];
-    const info: Record<string, Object> = message[TdField.INTERACTION_INFO] !== null &&
-      typeof message[TdField.INTERACTION_INFO] === 'object' &&
-      !Array.isArray(message[TdField.INTERACTION_INFO])
-      ? message[TdField.INTERACTION_INFO] as Record<string, Object>
-      : { ['@type']: 'messageInteractionInfo' };
-    const wrapper: Record<string, Object> = { ['@type']: 'messageReactions', 'reactions': reactions };
-    info[TdField.REACTIONS] = wrapper;
+    const info: Record<string, Object> | null = this.asRecord(update[TdField.INTERACTION_INFO]);
+    if (info === null) {
+      return;
+    }
     message[TdField.INTERACTION_INFO] = info;
     this.notifyChanged(chatId);
   };
@@ -483,7 +480,7 @@ export class MessageStore {
     router.register(TdUpdate.DELETE_MESSAGES, this.onDeleteMessages);
     router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
     router.register(TdUpdate.MESSAGE_EDITED, this.onMessageEdited);
-    router.register(TdUpdate.MESSAGE_REACTIONS, this.onMessageReactions);
+    router.register(TdUpdate.MESSAGE_INTERACTION_INFO, this.onMessageInteractionInfo);
     hilog.info(LOG_DOMAIN, TAG, 'started');
   }
 
