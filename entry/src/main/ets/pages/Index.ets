@@ -223,10 +223,15 @@ struct Index {
     });
   }
 
+  private chatPinnedQuerySeq: number = 0;
+
   private queryChatPinned(): Promise<Record<string, Object> | null> {
+    // extra 序号化（PR31 审计 P1-2 同源）
+    this.chatPinnedQuerySeq += 1;
+    const extra: string = `chatPinnedQuery_${this.chatPinnedQuerySeq}`;
     const found: Promise<Record<string, Object> | null> = new Promise(
       (resolve: (message: Record<string, Object> | null) => void): void => {
-        TdUpdateRouter.getInstance().waitForExtra('chatPinnedQuery', 10000)
+        TdUpdateRouter.getInstance().waitForExtra(extra, 10000)
           .then((update: Record<string, Object>): void => {
             const typeObj: Object | undefined = update['@type'];
             if (typeObj !== TdType.FOUND_CHAT_MESSAGES) {
@@ -259,7 +264,7 @@ struct Index {
       'limit': 1,
       'filter': filter
     };
-    request[TdField.EXTRA] = 'chatPinnedQuery';
+    request[TdField.EXTRA] = extra;
     TdClient.getInstance().send(request);
     return found;
   }

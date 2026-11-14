@@ -125,8 +125,8 @@ export struct ChatPanel {
   @Link panelKind: string;
   // 置顶条跳转请求（M7-D2）：宿主写入目标消息 id，@Watch 触发跳转后归零
   @Prop @Watch('onJumpRequestChanged') jumpRequest: number = 0;
-  /** 当前会话置顶消息 id（0 无；气泡菜单判定，M7-D2） */
-  chatPinnedId: number = 0;
+  /** 当前会话置顶消息 id（0 无；气泡菜单判定，M7-D2；@Prop 随宿主刷新） */
+  @Prop chatPinnedId: number = 0;
   // @mention 补全（M7-A3）：命中成员并行数组（userId/name/username）
   @State mentionUserIds: Array<number> = [];
   @State mentionNames: Array<string> = [];
@@ -281,6 +281,7 @@ export struct ChatPanel {
               } else if (entry.bubble !== null) {
                 MessageBubble({
                   model: entry.bubble,
+                  chatPinnedId: this.chatPinnedId,
                   onRetry: (messageId: number): void => {
                     this.retryMessage(messageId);
                   },

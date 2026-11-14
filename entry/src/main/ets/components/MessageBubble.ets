@@ -227,8 +227,8 @@ export struct MessageBubble {
   /** reaction 选择器回调（M7-D1：宿主弹可用集 ActionMenu） */
   onReactionPicker: (messageId: number) => void = (messageId: number): void => {
   };
-  /** 当前会话置顶消息 id（0 无；菜单「置顶/取消置顶」判定，M7-D2） */
-  chatPinnedId: number = 0;
+  /** 当前会话置顶消息 id（0 无；菜单「置顶/取消置顶」判定，M7-D2；@Prop 随宿主刷新） */
+  @Prop chatPinnedId: number = 0;
   /** 置顶切换回调（M7-D2：宿主 pinChatMessage/unpinChatMessage + 重查置顶条） */
   onPinToggle: (messageId: number, pinned: boolean) => void =
     (messageId: number, pinned: boolean): void => {
