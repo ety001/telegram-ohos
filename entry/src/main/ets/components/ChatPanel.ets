@@ -37,6 +37,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyCode } from '@kit.InputKit';
 import { promptAction } from '@kit.ArkUI';
 import { PhotoPreview, VideoPlayCover } from './MediaOverlays';
+import { MediaViewer, ViewerPhoto } from './MediaViewer';
 import { ForwardPicker } from './ForwardPicker';
 import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon } from './Icons';
 import { InputPanel, PanelKind } from './InputPanel';
@@ -95,6 +96,9 @@ export struct ChatPanel {
   // 全屏媒体覆盖层（图片预览 / 视频播放；bindContentCover 挂根布局）
   @State overlayKind: string = OverlayKind.NONE;
   @State overlayImageSrc: string = '';
+  // 查看器清单（M7-B1）：会话当前窗口内全部照片 + 定位下标
+  @State viewerPhotos: Array<ViewerPhoto> = [];
+  @State viewerStartIndex: number = 0;
   @State overlayVideoPath: string = '';
   @State overlayVideoTitle: string = '';
   // 回复模式（M6-2）：replyToMessageId > 0 时输入区上方挂引用预览条，发送携带 reply_to
@@ -267,8 +271,8 @@ export struct ChatPanel {
                   onRetry: (messageId: number): void => {
                     this.retryMessage(messageId);
                   },
-                  onPhotoOpen: (src: string): void => {
-                    this.openPhotoPreview(src);
+                  onPhotoOpen: (messageId: number): void => {
+                    this.openPhotoPreview(messageId);
                   },
                   onVideoOpen: (localPath: string, title: string): void => {
                     this.openVideoPlayer(localPath, title);
@@ -523,10 +527,16 @@ export struct ChatPanel {
   @Builder
   mediaOverlayBuilder() {
     if (this.overlayKind === OverlayKind.PHOTO) {
-      PhotoPreview({
-        src: this.overlayImageSrc,
+      MediaViewer({
+        photos: this.viewerPhotos,
+        startIndex: this.viewerStartIndex,
         onClose: (): void => {
           this.closeOverlay();
+        },
+        onDelete: (messageId: number): void => {
+          // 先收查看器再走消息删除确认链（ActionMenu 挂在宿主 UIContext）
+          this.closeOverlay();
+          this.confirmDeleteMessage(messageId);
         }
       })
     } else if (this.overlayKind === OverlayKind.VIDEO) {
@@ -556,11 +566,35 @@ export struct ChatPanel {
     }
   }
 
-  private openPhotoPreview(src: string): void {
-    if (src.length === 0) {
+  /**
+   * 打开照片查看器（M7-B1）：从当前 entries 组装照片清单（mediaKind==PHOTO 且有选中档或
+   * mini），定位到点击消息。PhotoPreview 单图链路退役（overlayImageSrc 保留供 VIDEO 标题等）。
+   */
+  private openPhotoPreview(messageId: number): void {
+    const photos: Array<ViewerPhoto> = new Array<ViewerPhoto>();
+    let start: number = 0;
+    for (const entry of this.entries) {
+      if (entry.isHeader || entry.bubble === null) {
+        continue;
+      }
+      const b: MessageBubbleModel = entry.bubble;
+      if (b.mediaKind !== MediaKind.PHOTO) {
+        continue;
+      }
+      const photo: ViewerPhoto = new ViewerPhoto();
+      photo.messageId = b.messageId;
+      photo.fileId = b.photoFileId;
+      photo.miniData = b.photoMini.startsWith('data:') ? b.photoMini.slice('data:image/jpeg;base64,'.length) : b.photoMini;
+      if (b.messageId === messageId) {
+        start = photos.length;
+      }
+      photos.push(photo);
+    }
+    if (photos.length === 0) {
       return;
     }
-    this.overlayImageSrc = src;
+    this.viewerPhotos = photos;
+    this.viewerStartIndex = start;
     this.overlayKind = OverlayKind.PHOTO;
   }
 
