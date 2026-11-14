@@ -731,6 +731,10 @@ struct Index {
               .fontColor(ChatUi.TEXT_PRIMARY)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .onClick((): void => {
+                router.pushUrl({ url: 'pages/MediaPage', params: { 'chatId': this.selectedChatId } as Record<string, Object> }).catch((): void => {
+                });
+              })
             if (this.chatStatusLine.length > 0) {
               Text(this.chatStatusLine)
                 .fontSize(12)
