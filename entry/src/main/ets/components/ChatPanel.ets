@@ -291,6 +291,15 @@ export struct ChatPanel {
                   },
                   onForwardAction: (messageId: number): void => {
                     this.openForwardPicker(messageId);
+                  },
+                  onReactionPicker: (messageId: number): void => {
+                    this.openReactionPicker(messageId);
+                  },
+                  onReactionAdd: (messageId: number, emoji: string): void => {
+                    MessageStore.getInstance().setReaction(this.chatId, messageId, emoji);
+                  },
+                  onReactionRemove: (messageId: number, emoji: string): void => {
+                    MessageStore.getInstance().removeReaction(this.chatId, messageId, emoji);
                   }
                 })
               }
@@ -916,6 +925,70 @@ export struct ChatPanel {
     this.editShowAbove = false;
   }
 
+  /**
+   * reaction 选择器（M7-D1 v1：ActionMenu ≤6 钮——官方默认集前 6；自定义面板挂后续）。
+   * 可用集：chat.available_reactions=Some 取前 6 emoji；Default/All/缺失→内置默认集。
+   */
+  private openReactionPicker(messageId: number): void {
+    // showActionMenu buttons 为定长 6 元组（PromptAction d.ts）——按可用集填充，缺槽 undefined；
+    // 移除自己的反应由点击已选 chip 承担（MessageBubble chips 行）
+    const list: Array<string> = this.availableReactions();
+    const b0: promptAction.Button = { text: list[0], color: ChatUi.TEXT_PRIMARY };
+    const b1: promptAction.Button | undefined = list.length > 1 ? { text: list[1], color: ChatUi.TEXT_PRIMARY } : undefined;
+    const b2: promptAction.Button | undefined = list.length > 2 ? { text: list[2], color: ChatUi.TEXT_PRIMARY } : undefined;
+    const b3: promptAction.Button | undefined = list.length > 3 ? { text: list[3], color: ChatUi.TEXT_PRIMARY } : undefined;
+    const b4: promptAction.Button | undefined = list.length > 4 ? { text: list[4], color: ChatUi.TEXT_PRIMARY } : undefined;
+    const b5: promptAction.Button | undefined = list.length > 5 ? { text: list[5], color: ChatUi.TEXT_PRIMARY } : undefined;
+    this.getUIContext().getPromptAction().showActionMenu({
+      title: '选择反应',
+      buttons: [b0, b1, b2, b3, b4, b5]
+    }).then((result: promptAction.ActionMenuSuccessResponse): void => {
+      if (result.index < 0 || result.index >= list.length) {
+        return;
+      }
+      MessageStore.getInstance().setReaction(this.chatId, messageId, list[result.index]);
+    }).catch((): void => {
+    });
+  }
+
+  /** chat.available_reactions → v1 可用 emoji 列表（≤6） */
+  private availableReactions(): Array<string> {
+    const defaults: Array<string> = ['👍', '❤️', '🔥', '🥳', '👎', '😍'];
+    const chat: Record<string, Object> | undefined = ChatListStore.getInstance().getChat(this.chatId);
+    if (chat === undefined) {
+      return defaults;
+    }
+    const avail: Record<string, Object> | null = ChatPanel.asRecord(chat[TdField.AVAILABLE_REACTIONS]);
+    if (avail === null) {
+      return defaults;
+    }
+    const typeObj: Object | undefined = avail['@type'];
+    if (typeObj === TdType.CHAT_AVAILABLE_SOME) {
+      const listObj: Object | undefined = avail[TdField.REACTIONS];
+      if (Array.isArray(listObj)) {
+        const list: Array<Object> = listObj as Array<Object>;
+        const out: Array<string> = new Array<string>();
+        for (const item of list) {
+          const reaction: Record<string, Object> | null = ChatPanel.asRecord(item);
+          if (reaction === null) {
+            continue;
+          }
+          const emojiObj: Object | undefined = reaction[TdField.EMOJI];
+          if (typeof emojiObj === 'string' && emojiObj.length > 0) {
+            out.push(emojiObj);
+          }
+          if (out.length >= 6) {
+            break;
+          }
+        }
+        if (out.length > 0) {
+          return out;
+        }
+      }
+    }
+    return defaults; // All/Default/未知 → 内置默认集
+  }
+
   /** 打开转发目标选择器（覆盖层内选定后 forwardMessages） */
   private openForwardPicker(messageId: number): void {
     this.forwardMessageId = messageId;
@@ -1332,6 +1405,9 @@ export struct ChatPanel {
     bubble.edited = ChatPanel.readNumber(message, TdField.EDIT_DATE) > 0;
     bubble.forwarded = MessageContent.isForwarded(message);
     bubble.forwardFrom = MessageContent.forwardFromNameOf(message);
+    // M7-D1：reactions 投影（interaction_info.reactions.messageReactions.reactions，
+    // 仅 reactionTypeEmoji 类型；customEmoji v1 跳过）
+    ChatPanel.attachReactions(bubble, message);
     bubble.highlighted = this.highlightMessageId !== 0 && bubble.messageId === this.highlightMessageId;
     bubble.styleKey = `${RichText.fingerprint(bubble.segments)}_${RichText.fingerprint(bubble.captionSegments)}`;
     const state: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.SENDING_STATE]);
@@ -1507,6 +1583,53 @@ export struct ChatPanel {
       bubble.replyToName = MessageContent.originNameOf(ref.origin, this.chatTitleFallback());
       bubble.replyToPreview = MessageContent.previewOfContent(ref.content);
     }
+  }
+
+  /** reactions 投影（M7-D1）：emoji/计数/chosen 三并排数组 + 自己已选 emoji */
+  private static attachReactions(bubble: MessageBubbleModel, message: Record<string, Object>): void {
+    const info: Record<string, Object> | null = ChatPanel.asRecord(message[TdField.INTERACTION_INFO]);
+    if (info === null) {
+      return;
+    }
+    const wrapper: Record<string, Object> | null = ChatPanel.asRecord(info[TdField.REACTIONS]);
+    if (wrapper === null) {
+      return;
+    }
+    const listObj: Object | undefined = wrapper[TdField.REACTIONS];
+    if (!Array.isArray(listObj)) {
+      return;
+    }
+    const list: Array<Object> = listObj as Array<Object>;
+    const emojis: Array<string> = new Array<string>();
+    const counts: Array<number> = new Array<number>();
+    const chosen: Array<boolean> = new Array<boolean>();
+    let myChosen: string = '';
+    for (const item of list) {
+      const reaction: Record<string, Object> | null = ChatPanel.asRecord(item);
+      if (reaction === null) {
+        continue;
+      }
+      const type: Record<string, Object> | null = ChatPanel.asRecord(reaction[TdField.REACTION_TYPE]);
+      if (type === null || type['@type'] !== TdType.REACTION_TYPE_EMOJI) {
+        continue; // customEmoji v1 跳过
+      }
+      const emojiObj: Object | undefined = type[TdField.EMOJI];
+      const emoji: string = typeof emojiObj === 'string' ? emojiObj : '';
+      if (emoji.length === 0) {
+        continue;
+      }
+      emojis.push(emoji);
+      counts.push(ChatPanel.readNumber(reaction, TdField.TOTAL_COUNT));
+      const isChosen: boolean = reaction[TdField.IS_CHOSEN] === true;
+      chosen.push(isChosen);
+      if (isChosen) {
+        myChosen = emoji;
+      }
+    }
+    bubble.reactionEmojis = emojis;
+    bubble.reactionCounts = counts;
+    bubble.reactionChosen = chosen;
+    bubble.myChosenEmoji = myChosen;
   }
 
   /** 会话对方名兜底：标题（私聊即对方名/群名）；空则「成员」 */

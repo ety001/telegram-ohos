@@ -166,6 +166,14 @@ export class MessageBubbleModel {
   chatAvatarFileId: number = 0;
   chatAvatarMini: string = '';
 
+  // ---------------- reactions（M7-D1） ----------------
+  /** emoji reaction 芯片（interaction_info 链投影；customEmoji 类型 v1 不过滤丢弃） */
+  reactionEmojis: Array<string> = [];
+  reactionCounts: Array<number> = [];
+  reactionChosen: Array<boolean> = [];
+  /** 自己已选中的 emoji（chip 点击切换/移除判定） */
+  myChosenEmoji: string = '';
+
   /** ForEach 键后缀：状态/已读/内容指纹任一变化即换键，强制重建气泡（编辑与发送状态机可见刷新） */
   keySuffix(): string {
     // 文本全量入键（M3 复审 MEDIUM 修复：同长度编辑如改错别字时 length 不变会漏刷新）；
@@ -175,7 +183,8 @@ export class MessageBubbleModel {
       `_${this.mediaKind}_${this.photoFileId}_${this.videoFileId}_${this.docFileId}_${this.caption}` +
       `_${this.styleKey}_${this.replyToMessageId}_${this.replyToPreview}_${this.highlighted}` +
       `_${this.edited}_${this.forwardFrom}_${this.voiceUnheard}_${this.stickerFileId}_${this.animFileId}` +
-      `_${this.groupedWithPrev}_${this.groupedWithNext}_${this.senderName}_${this.senderColor}`;
+      `_${this.groupedWithPrev}_${this.groupedWithNext}_${this.senderName}_${this.senderColor}` +
+      `_${this.reactionEmojis.length}_${this.myChosenEmoji}_${this.reactionCounts.join('/')}`;
   }
 }
 
@@ -214,6 +223,16 @@ export struct MessageBubble {
   };
   /** 转发动作回调（M6-3：打开转发目标选择器） */
   onForwardAction: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** reaction 选择器回调（M7-D1：宿主弹可用集 ActionMenu） */
+  onReactionPicker: (messageId: number) => void = (messageId: number): void => {
+  };
+  /** reaction 增加/移除回调（M7-D1：宿主走 MessageStore.setReaction/removeReaction） */
+  onReactionAdd: (messageId: number, emoji: string) => void =
+    (messageId: number, emoji: string): void => {
+  };
+  onReactionRemove: (messageId: number, emoji: string) => void =
+    (messageId: number, emoji: string): void => {
   };
 
   // ---------------- 下载态（FileDownloadStore 订阅） ----------------
@@ -533,6 +552,40 @@ export struct MessageBubble {
     return { width: 0.5, color: '#14FFFFFF' };
   }
 
+  /**
+   * reactions 芯片行（M7-D1）：气泡内底部（时间行上方）；chip = emoji + 计数胶囊，
+   * 自己选中高亮描边；点击 chip = 未选→add / 已选→remove（回调宿主走 MessageStore）。
+   */
+  @Builder
+  reactionChipsRow() {
+    Row({ space: 4 }) {
+      ForEach(this.model.reactionEmojis, (emoji: string, index: number) => {
+        Row({ space: 3 }) {
+          Text(emoji)
+            .fontSize(13)
+          Text(`${this.model.reactionCounts[index]}`)
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.model.reactionChosen[index] ? '#FFFFFF' : ChatUi.TEXT_SECONDARY)
+        }
+        .height(24)
+        .padding({ left: 8, right: 8 })
+        .borderRadius(12)
+        .backgroundColor(this.model.reactionChosen[index] ? ChatUi.ACCENT : ChatUi.SEARCH_BG)
+        .onClick((): void => {
+          if (this.model.reactionChosen[index]) {
+            this.onReactionRemove(this.model.messageId, emoji);
+          } else {
+            this.onReactionAdd(this.model.messageId, emoji);
+          }
+        })
+      }, (emoji: string, index: number) => `${emoji}_${index}_${this.model.reactionCounts[index]}`)
+    }
+    .width('100%')
+    .padding({ left: 8, top: 4, bottom: 2 })
+    .alignItems(VerticalAlign.Center)
+  }
+
   /** 回复引用条：来源名 + 单行预览 + 左侧强调竖线；点击跳转源消息 */  @Builder
   replyQuoteBar() {
     Row({ space: 6 }) {
@@ -586,6 +639,11 @@ export struct MessageBubble {
             this.onEditAction(this.model.messageId);
           })
       }
+      MenuItem({ content: '反应' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.onReactionPicker(this.model.messageId);
+        })
       MenuItem({ content: '转发' })
         .contentFontColor(ChatUi.TEXT_PRIMARY)
         .onClick((): void => {
@@ -847,6 +905,9 @@ export struct MessageBubble {
           })
       }
 
+      if (this.model.reactionEmojis.length > 0) {
+        this.reactionChipsRow()
+      }
       if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
         Row({ space: 4 }) {
         if (this.model.sendState === BubbleSendState.FAILED) {
@@ -1305,6 +1366,9 @@ export struct MessageBubble {
         .margin({ top: 4 })
       }
 
+      if (this.model.reactionEmojis.length > 0) {
+        this.reactionChipsRow()
+      }
       if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
         Row({ space: 4 }) {
         if (this.model.sendState === BubbleSendState.FAILED) {
@@ -1357,6 +1421,9 @@ export struct MessageBubble {
         Text(this.model.placeholder.length > 0 ? this.model.placeholder : '[暂不支持的消息类型]')
           .fontSize(13)
           .fontColor(this.model.isOutgoing ? ChatUi.DATE_TEXT_OUT : ChatUi.DATE_TEXT_IN)
+      }
+      if (this.model.reactionEmojis.length > 0) {
+        this.reactionChipsRow()
       }
       if (!this.model.groupedWithNext || this.model.sendState === BubbleSendState.FAILED) {
         Row({ space: 4 }) {
