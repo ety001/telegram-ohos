@@ -222,6 +222,12 @@ export class TdType {
   // @mention 补全（M7-A3；chatMembersFilterMention 专用可提及成员查询）
   static readonly CHAT_MEMBERS_FILTER_MENTION: string = 'chatMembersFilterMention';
   static readonly RESULT_CHAT_MEMBERS: string = 'chatMembers';
+  // 共享媒体区（M7-B2；SearchMessagesFilter 子类型 + foundChatMessages 游标）
+  static readonly FILTER_PHOTO: string = 'searchMessagesFilterPhoto';
+  static readonly FILTER_VIDEO: string = 'searchMessagesFilterVideo';
+  static readonly FILTER_DOCUMENT: string = 'searchMessagesFilterDocument';
+  static readonly FILTER_URL: string = 'searchMessagesFilterUrl';
+  static readonly FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
   // 贴纸格式（M6-7；sticker.format:StickerFormat 判别——webp 静态可直渲，tgs/webm 动效挂 M7）
   static readonly STICKER_FORMAT_WEBP: string = 'stickerFormatWebp';
   static readonly STICKER_FORMAT_TGS: string = 'stickerFormatTgs';
@@ -323,6 +329,7 @@ export class TdField {
   // @mention（M7-A3；chatMembers/user.usernames 结构字段）
   static readonly MEMBERS: string = 'members';
   static readonly MEMBER_ID: string = 'member_id';
+  static readonly NEXT_FROM_MESSAGE_ID: string = 'next_from_message_id';
   static readonly USERNAMES: string = 'usernames';
   static readonly ACTIVE_USERNAMES: string = 'active_usernames';
   static readonly FIRST_NAME: string = 'first_name';
