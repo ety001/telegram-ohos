@@ -227,6 +227,12 @@ export struct MessageBubble {
   /** reaction 选择器回调（M7-D1：宿主弹可用集 ActionMenu） */
   onReactionPicker: (messageId: number) => void = (messageId: number): void => {
   };
+  /** 当前会话置顶消息 id（0 无；菜单「置顶/取消置顶」判定，M7-D2） */
+  chatPinnedId: number = 0;
+  /** 置顶切换回调（M7-D2：宿主 pinChatMessage/unpinChatMessage + 重查置顶条） */
+  onPinToggle: (messageId: number, pinned: boolean) => void =
+    (messageId: number, pinned: boolean): void => {
+  };
   /** reaction 增加/移除回调（M7-D1：宿主走 MessageStore.setReaction/removeReaction） */
   onReactionAdd: (messageId: number, emoji: string) => void =
     (messageId: number, emoji: string): void => {
@@ -643,6 +649,11 @@ export struct MessageBubble {
         .contentFontColor(ChatUi.TEXT_PRIMARY)
         .onClick((): void => {
           this.onReactionPicker(this.model.messageId);
+        })
+      MenuItem({ content: this.model.messageId === this.chatPinnedId ? '取消置顶' : '置顶' })
+        .contentFontColor(ChatUi.TEXT_PRIMARY)
+        .onClick((): void => {
+          this.onPinToggle(this.model.messageId, this.model.messageId !== this.chatPinnedId);
         })
       MenuItem({ content: '转发' })
         .contentFontColor(ChatUi.TEXT_PRIMARY)

@@ -417,6 +417,29 @@ export class MessageStore {
     TdClient.getInstance().send(request);
   }
 
+  /** 置顶/取消置顶消息（M7-D2）：结果经消息/会话更新流驱动（is_pinned 随消息对象下发） */
+  setPinned(chatId: number, messageId: number, pinned: boolean): void {
+    if (chatId === 0 || messageId <= 0 || !this.started) {
+      return;
+    }
+    const request: Record<string, Object> = pinned
+      ? {
+        ['@type']: TdReq.PIN_CHAT_MESSAGE,
+        'chat_id': chatId,
+        'message_id': messageId,
+        'disable_notification': false,
+        'only_for_self': false
+      }
+      : {
+        ['@type']: TdReq.UNPIN_CHAT_MESSAGE,
+        'chat_id': chatId,
+        'message_id': messageId
+      };
+    TdClient.getInstance().send(request);
+    hilog.info(LOG_DOMAIN, TAG, 'setPinned: chat=%{public}s id=%{public}d pin=%{public}s',
+      `${chatId}`, `${messageId}`, `${pinned}`);
+  }
+
   /** 语音已听上报（M6-6）：openMessageContent——is_listened 由 updateMessageContent 刷新 */
   reportListened(chatId: number, messageId: number): void {
     if (chatId === 0 || messageId <= 0 || !this.started) {

@@ -18,7 +18,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { TdClient } from '../tdlib/TdClient';
 import { AuthService, AppAuthState, AuthStateObserver } from '../core/AuthService';
-import { AuthStateType, TdReq, TdUpdate, TdField } from '../core/TdConstants';
+import { AuthStateType, TdReq, TdUpdate, TdField, TdType } from '../core/TdConstants';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { MessageStore } from '../core/MessageStore';
 import { FileDownloadStore } from '../core/FileDownloadStore';
@@ -26,6 +26,8 @@ import { NotificationService, ChatRouteObserver } from '../core/NotificationServ
 import { DraftStore } from '../core/DraftStore';
 import { UserStore } from '../core/UserStore';
 import { StickerStore } from '../core/StickerStore';
+import { MessageContent } from '../core/MessageContent';
+import { TdUpdateRouter } from '../core/TdUpdateRouter';
 import { BreakpointTool, Breakpoint, BreakpointObserver } from '../core/BreakpointTool';
 import { ChatUi, ChatRowModel } from './ChatUi';
 import { ChatListDataSource } from './ChatListDataSource';
@@ -105,6 +107,10 @@ struct Index {
   @State chatPanelKind: string = '';
   /** 聊天区顶栏状态行（UI 打磨：私聊 在线/最后见于…） */
   @State chatStatusLine: string = '';
+  /** 置顶消息（M7-D2，md/lg 聊天区） */
+  @State chatPinnedId: number = 0;
+  @State chatPinnedPreview: string = '';
+  @State chatJumpRequest: number = 0;
   private readonly chatUserObserver: () => void = (): void => {
     this.refreshChatStatus();
   };
@@ -196,6 +202,66 @@ struct Index {
     }
     const text: string | null = UserStore.getInstance().statusText(userId);
     this.chatStatusLine = text === null ? '' : text;
+  }
+
+  /** 置顶条刷新（M7-D2，md/lg）：searchChatMessages(filterPinned) 主动查询 */
+  private refreshChatPinned(): void {
+    if (this.selectedChatId === 0) {
+      this.chatPinnedId = 0;
+      this.chatPinnedPreview = '';
+      return;
+    }
+    this.queryChatPinned().then((found: Record<string, Object> | null): void => {
+      if (found === null) {
+        this.chatPinnedId = 0;
+        this.chatPinnedPreview = '';
+        return;
+      }
+      const idObj: Object | undefined = found[TdField.ID];
+      this.chatPinnedId = typeof idObj === 'number' ? idObj : 0;
+      this.chatPinnedPreview = MessageContent.previewTextOf(found);
+    });
+  }
+
+  private queryChatPinned(): Promise<Record<string, Object> | null> {
+    const found: Promise<Record<string, Object> | null> = new Promise(
+      (resolve: (message: Record<string, Object> | null) => void): void => {
+        TdUpdateRouter.getInstance().waitForExtra('chatPinnedQuery', 10000)
+          .then((update: Record<string, Object>): void => {
+            const typeObj: Object | undefined = update['@type'];
+            if (typeObj !== TdType.FOUND_CHAT_MESSAGES) {
+              resolve(null);
+              return;
+            }
+            const messagesObj: Object | undefined = update['messages'];
+            if (!Array.isArray(messagesObj) || (messagesObj as Array<Object>).length === 0) {
+              resolve(null);
+              return;
+            }
+            const first: Object | undefined = (messagesObj as Array<Object>)[0];
+            if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
+              resolve(first as Record<string, Object>);
+              return;
+            }
+            resolve(null);
+          })
+          .catch((reason: string): void => {
+            resolve(null);
+          });
+      });
+    const filter: Record<string, Object> = { ['@type']: TdType.FILTER_PINNED };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEARCH_CHAT_MESSAGES,
+      'chat_id': this.selectedChatId,
+      'query': '',
+      'from_message_id': 0,
+      'offset': 0,
+      'limit': 1,
+      'filter': filter
+    };
+    request[TdField.EXTRA] = 'chatPinnedQuery';
+    TdClient.getInstance().send(request);
+    return found;
   }
 
   private refreshVisibleCount(): void {
@@ -338,6 +404,7 @@ struct Index {
     this.selectedChatId = row.chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(row.chatId);
     this.refreshChatStatus();
+    this.refreshChatPinned();
   }
 
   /**
@@ -377,6 +444,7 @@ struct Index {
     this.selectedChatId = chatId;
     this.selectedChatTitle = ChatListStore.getInstance().getTitle(chatId);
     this.refreshChatStatus();
+    this.refreshChatPinned();
   }
 
   /**
@@ -757,7 +825,42 @@ struct Index {
         .alignItems(VerticalAlign.Center)
         .backgroundColor(ChatUi.LIST_BG)
 
-        ChatPanel({ chatId: this.selectedChatId, showSearch: $chatSearchOpen, panelKind: $chatPanelKind })
+        if (this.chatPinnedId !== 0) {
+          Row({ space: 8 }) {
+            Text('置顶')
+              .fontSize(11)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(ChatUi.ACCENT)
+            Text(this.chatPinnedPreview.length > 0 ? this.chatPinnedPreview : '消息')
+              .fontSize(13)
+              .fontColor(ChatUi.TEXT_SECONDARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .height(36)
+          .padding({ left: 16, right: 16 })
+          .alignItems(VerticalAlign.Center)
+          .backgroundColor(ChatUi.PINNED_BG)
+          .onClick((): void => {
+            this.chatJumpRequest = this.chatPinnedId;
+          })
+        }
+
+        ChatPanel({
+          chatId: this.selectedChatId,
+          showSearch: $chatSearchOpen,
+          panelKind: $chatPanelKind,
+          jumpRequest: this.chatJumpRequest,
+          chatPinnedId: this.chatPinnedId,
+          onJumpConsumed: (): void => {
+            this.chatJumpRequest = 0;
+          },
+          onPinAction: (): void => {
+            this.refreshChatPinned();
+          }
+        })
       } else {
         Column() {
           Blank()
