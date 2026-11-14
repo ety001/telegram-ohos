@@ -20,6 +20,8 @@ import { VideoPlayCover } from '../components/MediaOverlays';
 import { StickerCell } from '../components/StickerCell';
 import { BackIcon } from '../components/Icons';
 import { TdClient } from '../tdlib/TdClient';
+import { MessageStore } from '../core/MessageStore';
+import { promptAction } from '@kit.ArkUI';
 import { TdUpdateRouter } from '../core/TdUpdateRouter';
 import { TdReq, TdField, TdType } from '../core/TdConstants';
 
@@ -257,6 +259,8 @@ struct DocumentRow {
     }
   }
 
+  private saving: boolean = false;
+
   private handleClick(): void {
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     if (this.fileId === 0) {
@@ -268,6 +272,10 @@ struct DocumentRow {
       }
       return;
     }
+    if (this.saving) {
+      return; // 存储框防重（PR28 审计 P2-2）
+    }
+    this.saving = true;
     const hostContext: Object | undefined = this.getUIContext().getHostContext();
     if (hostContext === undefined) {
       return;
@@ -276,6 +284,9 @@ struct DocumentRow {
     MediaSaver.saveDocument(context, store.getLocalPath(this.fileId),
       this.fileName.length > 0 ? this.fileName : `file_${this.fileId}`)
       .catch((): void => {
+      })
+      .finally((): void => {
+        this.saving = false;
       });
   }
 
@@ -571,10 +582,9 @@ struct MediaPage {
           this.overlayKind = '';
         },
         onDelete: (messageId: number): void => {
-          // 媒体页删除：乐观本地移除 + revoke 确认链简化（无会话气泡上下文）
+          // 先收查看器再弹删除方式选择（沿 ChatPanel 三选 ActionMenu 语义）
           this.overlayKind = '';
-          this.removeLocalById(messageId);
-          MessageStoreSafe.delete(this.chatId, messageId);
+          this.confirmRemove(messageId);
         }
       })
     } else if (this.overlayKind === 'video') {
@@ -651,12 +661,15 @@ struct MediaPage {
         const listObj: Object | undefined = update['messages'];
         const list: Array<Object> = Array.isArray(listObj) ? listObj as Array<Object> : [];
         let added: number = 0;
+        const fresh: Array<Record<string, Object>> = new Array<Record<string, Object>>();
         for (const item of list) {
           if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
-            state.messages.push(item as Record<string, Object>);
+            fresh.push(item as Record<string, Object>);
             added += 1;
           }
         }
+        // @State 一级观察：内嵌数组必须整组重赋值才可观测（PR28 审计 P1-1）
+        state.messages = state.messages.concat(fresh);
         const nextObj: Object | undefined = update[TdField.NEXT_FROM_MESSAGE_ID];
         const next: number = typeof nextObj === 'number' ? nextObj : 0;
         state.nextFromId = next;
@@ -729,6 +742,25 @@ struct MediaPage {
     }
   }
 
+  /** 删除确认（ActionMenu 三选，沿 ChatPanel 语义）：乐观本地移除 + revoke 请求 */
+  private confirmRemove(messageId: number): void {
+    this.getUIContext().getPromptAction().showActionMenu({
+      title: '删除消息？',
+      buttons: [
+        { text: '删除（所有人）', color: ChatUi.BUBBLE_ERROR },
+        { text: '删除（仅自己）', color: ChatUi.TEXT_PRIMARY },
+        { text: '取消', color: ChatUi.TEXT_SECONDARY }
+      ]
+    }).then((result: promptAction.ActionMenuSuccessResponse): void => {
+      if (result.index !== 0 && result.index !== 1) {
+        return;
+      }
+      this.removeLocalById(messageId);
+      MessageStore.getInstance().deleteMessages(this.chatId, [messageId], result.index === 0);
+    }).catch((): void => {
+    });
+  }
+
   /** 媒体页删除：本地清单移除（乐观） */
   private removeLocalById(messageId: number): void {
     const state: TabState = this.currentTab();
@@ -762,15 +794,3 @@ class ChatListStoreSafe {
   }
 }
 
-class MessageStoreSafe {
-  static delete(chatId: number, messageId: number): void {
-    const ids: Array<number> = [messageId];
-    const request: Record<string, Object> = {
-      ['@type']: 'deleteMessages',
-      'chat_id': chatId,
-      'message_ids': ids,
-      'revoke': true
-    };
-    TdClient.getInstance().send(request);
-  }
-}
