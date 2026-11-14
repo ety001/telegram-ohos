@@ -676,6 +676,7 @@ export struct MessageBubble {
   @Builder
   bubbleMenu() {
     Menu() {
+      if (!this.selectionMode) {
       MenuItem({ content: '回复' })
         .contentFontColor(ChatUi.TEXT_PRIMARY)
         .onClick((): void => {
@@ -720,6 +721,7 @@ export struct MessageBubble {
         .onClick((): void => {
           this.onDeleteAction(this.model.messageId);
         })
+      }
     }
     // 应用为固定深色视觉，Menu 默认底色跟随系统会跳浅色——显式对齐列表底色
     .backgroundColor(ChatUi.LIST_BG)
@@ -928,6 +930,9 @@ export struct MessageBubble {
                 .fontSize(11)
                 .fontColor(this.model.isOutgoing ? ChatUi.SERVICE_TEXT_OUT : ChatUi.SERVICE_TEXT_IN)
                 .onClick((): void => {
+                  if (this.selectionMode) {
+                    return;
+                  }
                   AudioPlayerController.getInstance().cycleSpeed(this.audioKey());
                 })
             }
@@ -1233,6 +1238,9 @@ export struct MessageBubble {
 
   /** 贴纸加载失败重拉（点击兜底，沿图片 FAILED 补救思路；本体仅 webp 可拉） */
   private handleStickerClick(): void {
+    if (this.selectionMode) {
+      return;
+    }
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     if (this.stickerImageSrc().length > 0) {
       return;
@@ -1338,6 +1346,9 @@ export struct MessageBubble {
   }
 
   private handleAnimClick(): void {
+    if (this.selectionMode) {
+      return;
+    }
     const store: FileDownloadStore = FileDownloadStore.getInstance();
     const fileId: number = this.model.animFileId;
     if (fileId === 0) {
@@ -1553,6 +1564,9 @@ export struct MessageBubble {
             // 等宽字体：monospace 不可用时按列表回落 HarmonyOS Sans（fontFamily 官方支持逗号回落）
             .fontFamily(segment.code ? 'monospace, HarmonyOS Sans' : 'HarmonyOS Sans')
             .onClick((): void => {
+              if (this.selectionMode) {
+                return;
+              }
               if (segment.url.length > 0) {
                 this.linkClickConsumed = true;
                 this.openExternalLink(segment.url);
