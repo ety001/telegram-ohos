@@ -244,6 +244,7 @@ export class TdType {
   static readonly FILTER_VIDEO: string = 'searchMessagesFilterVideo';
   static readonly FILTER_DOCUMENT: string = 'searchMessagesFilterDocument';
   static readonly FILTER_URL: string = 'searchMessagesFilterUrl';
+  static readonly FILTER_PINNED: string = 'searchMessagesFilterPinned'; // 会话置顶消息查询（1.8.63 无 pinned_message_id 字段，经此过滤器获取）
   static readonly FILTER_EMPTY: string = 'searchMessagesFilterEmpty';
   // 贴纸格式（M6-7；sticker.format:StickerFormat 判别——webp 静态可直渲，tgs/webm 动效挂 M7）
   static readonly STICKER_FORMAT_WEBP: string = 'stickerFormatWebp';

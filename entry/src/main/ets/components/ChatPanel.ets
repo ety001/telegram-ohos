@@ -123,6 +123,10 @@ export struct ChatPanel {
   private searchSeq: number = 0;
   // 输入面板（M7-A1）：'' = 关闭；emoji/贴纸/GIF（A2/A3 扩展）
   @Link panelKind: string;
+  // 置顶条跳转请求（M7-D2）：宿主写入目标消息 id，@Watch 触发跳转后归零
+  @Prop @Watch('onJumpRequestChanged') jumpRequest: number = 0;
+  /** 当前会话置顶消息 id（0 无；气泡菜单判定，M7-D2；@Prop 随宿主刷新） */
+  @Prop chatPinnedId: number = 0;
   // @mention 补全（M7-A3）：命中成员并行数组（userId/name/username）
   @State mentionUserIds: Array<number> = [];
   @State mentionNames: Array<string> = [];
@@ -197,6 +201,15 @@ export struct ChatPanel {
     this.switchChat();
   }
 
+  /** 置顶条点击跳转（M7-D2）：目标消息定位后经回调归零（@Prop 单向，宿主防同值不触发） */
+  onJumpRequestChanged(): void {
+    if (this.jumpRequest > 0) {
+      const target: number = this.jumpRequest;
+      this.onJumpConsumed();
+      this.jumpToMessage(target);
+    }
+  }
+
   private switchChat(): void {
     if (this.chatId === this.activatedChatId) {
       return;
@@ -268,6 +281,7 @@ export struct ChatPanel {
               } else if (entry.bubble !== null) {
                 MessageBubble({
                   model: entry.bubble,
+                  chatPinnedId: this.chatPinnedId,
                   onRetry: (messageId: number): void => {
                     this.retryMessage(messageId);
                   },
@@ -294,6 +308,10 @@ export struct ChatPanel {
                   },
                   onReactionPicker: (messageId: number): void => {
                     this.openReactionPicker(messageId);
+                  },
+                  onPinToggle: (messageId: number, pinned: boolean): void => {
+                    MessageStore.getInstance().setPinned(this.chatId, messageId, pinned);
+                    this.onPinAction();
                   },
                   onReactionAdd: (messageId: number, emoji: string): void => {
                     MessageStore.getInstance().setReaction(this.chatId, messageId, emoji);
@@ -1111,6 +1129,13 @@ export struct ChatPanel {
     this.applyProgrammaticInput(next);
     this.clearMentions();
   }
+
+  /** 置顶动作后置（M7-D2）：宿主重查置顶条回调（ChatPanel 注入） */
+  onPinAction: () => void = (): void => {
+  };
+  /** 跳转请求消费回调（M7-D2：宿主归零 jumpRequest） */
+  onJumpConsumed: () => void = (): void => {
+  };
 
   /** 面板开关（M7-A1）：展开时收起软键盘（focusController 清焦，失败静默） */
   private togglePanel(): void {

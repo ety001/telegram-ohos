@@ -10,6 +10,11 @@
 import { router } from '@kit.ArkUI';
 import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { UserStore } from '../core/UserStore';
+import { MessageContent } from '../core/MessageContent';
+import { MessageStore } from '../core/MessageStore';
+import { TdClient } from '../tdlib/TdClient';
+import { TdUpdateRouter } from '../core/TdUpdateRouter';
+import { TdReq, TdField, TdType } from '../core/TdConstants';
 import { ChatPanel } from '../components/ChatPanel';
 import { ChatUi } from './ChatUi';
 import { BackIcon, SearchIcon } from '../components/Icons';
@@ -25,6 +30,10 @@ struct ChatPage {
   @State statusLine: string = '';
   /** 输入面板开关（M7-A1，@Link 传入 ChatPanel） */
   @State panelKind: string = '';
+  /** 置顶消息（M7-D2）：id/预览文本；点击跳转（jumpRequest @Link 传 ChatPanel） */
+  @State pinnedId: number = 0;
+  @State pinnedPreview: string = '';
+  @State jumpRequest: number = 0;
   private readonly userObserver: () => void = (): void => {
     this.refreshStatus();
   };
@@ -43,6 +52,7 @@ struct ChatPage {
     }
     this.refreshTitle();
     this.refreshStatus();
+    this.refreshPinned();
     ChatListStore.getInstance().addObserver(this.storeObserver);
     UserStore.getInstance().addObserver(this.userObserver);
   }
@@ -69,6 +79,72 @@ struct ChatPage {
     }
     const text: string | null = UserStore.getInstance().statusText(userId);
     this.statusLine = text === null ? '' : text;
+  }
+
+  /** 置顶条刷新（M7-D2）：searchChatMessages(filterPinned, limit 1)——1.8.63 无
+   * pinned_message_id 字段/更新流，激活与置顶动作后主动查询 */
+  private refreshPinned(): void {
+    if (this.chatId === 0) {
+      this.pinnedId = 0;
+      this.pinnedPreview = '';
+      return;
+    }
+    this.queryPinned().then((found: Record<string, Object> | null): void => {
+      if (found === null) {
+        this.pinnedId = 0;
+        this.pinnedPreview = '';
+        return;
+      }
+      const idObj: Object | undefined = found[TdField.ID];
+      this.pinnedId = typeof idObj === 'number' ? idObj : 0;
+      this.pinnedPreview = MessageContent.previewTextOf(found);
+    });
+  }
+
+  private pinnedQuerySeq: number = 0;
+
+  private queryPinned(): Promise<Record<string, Object> | null> {
+    // extra 序号化（PR31 审计 P1-2）：固定 extra 并发等待 duplicate waiter reject
+    this.pinnedQuerySeq += 1;
+    const extra: string = `pinnedQuery_${this.pinnedQuerySeq}`;
+    const found: Promise<Record<string, Object> | null> = new Promise(
+      (resolve: (message: Record<string, Object> | null) => void): void => {
+        TdUpdateRouter.getInstance().waitForExtra(extra, 10000)
+          .then((update: Record<string, Object>): void => {
+            const typeObj: Object | undefined = update['@type'];
+            if (typeObj !== TdType.FOUND_CHAT_MESSAGES) {
+              resolve(null);
+              return;
+            }
+            const messagesObj: Object | undefined = update['messages'];
+            if (!Array.isArray(messagesObj) || (messagesObj as Array<Object>).length === 0) {
+              resolve(null);
+              return;
+            }
+            const first: Object | undefined = (messagesObj as Array<Object>)[0];
+            if (first !== null && typeof first === 'object' && !Array.isArray(first)) {
+              resolve(first as Record<string, Object>);
+              return;
+            }
+            resolve(null);
+          })
+          .catch((reason: string): void => {
+            resolve(null);
+          });
+      });
+    const filter: Record<string, Object> = { ['@type']: TdType.FILTER_PINNED };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEARCH_CHAT_MESSAGES,
+      'chat_id': this.chatId,
+      'query': '',
+      'from_message_id': 0,
+      'offset': 0,
+      'limit': 1,
+      'filter': filter
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+    return found;
   }
 
   build() {
@@ -114,9 +190,45 @@ struct ChatPage {
       .alignItems(VerticalAlign.Center)
       .backgroundColor(ChatUi.LIST_BG)
 
+      // 置顶消息条（M7-D2）：点击跳转
+      if (this.chatId !== 0 && this.pinnedId !== 0) {
+        Row({ space: 8 }) {
+          Text('置顶')
+            .fontSize(11)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(ChatUi.ACCENT)
+          Text(this.pinnedPreview.length > 0 ? this.pinnedPreview : '消息')
+            .fontSize(13)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .height(36)
+        .padding({ left: 16, right: 16 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(ChatUi.PINNED_BG)
+        .onClick((): void => {
+          this.jumpRequest = this.pinnedId;
+        })
+      }
+
       // 消息流 + 输入区：ChatPanel 内嵌（生命周期/已读上报由组件自理）
       if (this.chatId !== 0) {
-        ChatPanel({ chatId: this.chatId, showSearch: $showSearch, panelKind: $panelKind })
+        ChatPanel({
+          chatId: this.chatId,
+          showSearch: $showSearch,
+          panelKind: $panelKind,
+          jumpRequest: this.jumpRequest,
+          chatPinnedId: this.pinnedId,
+          onJumpConsumed: (): void => {
+            this.jumpRequest = 0;
+          },
+          onPinAction: (): void => {
+            this.refreshPinned();
+          }
+        })
       }
     }
     .width('100%')
