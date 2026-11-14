@@ -237,6 +237,8 @@ export struct MessageBubble {
   private listenReported: boolean = false;
   // 贴纸/动图下载态（M6-7）+ 私聊会话头像就绪（UI 打磨，组尾头像即时刷新）
   @State chatAvatarReady: boolean = false;
+  /** 悬停高亮（M7-C1：PC 鼠标 Enter/Leave，官方 message hover 语义） */
+  @State hovered: boolean = false;
   @State stickerReady: boolean = false;
   @State stickerThumbReady: boolean = false;
   @State animReady: boolean = false;
@@ -357,7 +359,18 @@ export struct MessageBubble {
       if (!this.model.isOutgoing) {
         this.senderAvatar()
       }
-      Column() {
+      Stack({ alignContent: this.model.isOutgoing ? Alignment.BottomEnd : Alignment.BottomStart }) {
+        // 尾巴（M7-C1）：组尾 + 气泡型消息，sender 侧底角向外伸 6px（官方 bubble_tail 语义）
+        if (this.tailVisible()) {
+          Path()
+            .width(6)
+            .height(10)
+            .commands(this.model.isOutgoing ?
+              'M6 0 L6 10 C3.2 9.2 0.6 6.8 0 2.4 L0 0 Z' : 'M0 0 L0 10 C2.8 9.2 5.4 6.8 6 2.4 L6 0 Z')
+            .fill(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
+            .translate({ x: this.model.isOutgoing ? 5.6 : -5.6, y: -2 })
+        }
+        Column() {
         // 群聊发送者昵称（组首着色，仅非私聊 + incoming + 组首）
         if (!this.model.isOutgoing && this.model.senderName.length > 0 && !this.model.groupedWithPrev) {
           Text(this.model.senderName)
@@ -404,6 +417,7 @@ export struct MessageBubble {
       .margin({ top: this.model.groupedWithPrev ? 0 : 6, bottom: 2 })
       // 跳转高亮（M6-2/5）：短暂强调背景色（与气泡自身底色叠加由透明度保证可辨识）
       .backgroundColor(this.model.highlighted ? ChatUi.HIGHLIGHT_BG : Color.Transparent)
+      }
       if (!this.model.isOutgoing) {
         Blank()
           .layoutWeight(1)
@@ -411,6 +425,15 @@ export struct MessageBubble {
     }
     .width('100%')
     .padding({ left: 12, right: 12, top: 0, bottom: 0 })
+    // 悬停高亮（M7-C1）：PC 鼠标 Enter/Leave 行底色微亮（官方 message hover 语义）
+    .onMouse((event: MouseEvent): void => {
+      if (event.action === MouseAction.ENTER_WINDOW) {
+        this.hovered = true;
+      } else if (event.action === MouseAction.LEAVE_WINDOW) {
+        this.hovered = false;
+      }
+    })
+    .backgroundColor(this.hovered ? '#0FFFFFFF' : Color.Transparent)
     // 消息上下文菜单（M6-2）：长按（触屏/触控板）与右键（PC 鼠标）双入口，沿 Index 会话菜单模式
     .bindContextMenu(this.bubbleMenu(), ResponseType.LongPress)
     .bindContextMenu(this.bubbleMenu(), ResponseType.RightClick)
@@ -472,14 +495,40 @@ export struct MessageBubble {
    * 组合圆角（UI 打磨）：基准 12；组内相邻侧收小到 4（贴近 Telegram 消息串联视觉）。
    * incoming 收左上/左下，outgoing 收右上/右下。
    */
+  /**
+   * 气泡型消息（text/document/voice）组尾显示尾巴（M7-C1）——媒体 skipBubbleTail 语义不加尾。
+   * 尾挂在 sender 侧底角：该角归零与尾图无缝衔接。
+   */
+  private tailVisible(): boolean {
+    if (this.model.groupedWithNext) {
+      return false;
+    }
+    return this.model.mediaKind === MediaKind.NONE ||
+      this.model.mediaKind === MediaKind.DOCUMENT ||
+      this.model.mediaKind === MediaKind.VOICE ||
+      this.model.mediaKind === MediaKind.AUDIO;
+  }
+
   private groupedRadius(): BorderRadiuses {
     const r: number = 16;
     const s: number = 6;
-    // incoming 收左上/左下，outgoing 收右上/右下（组内相邻侧 4；BorderRadiuses 为对象接口）
+    // incoming 收左上/左下，outgoing 收右上/右下（组内相邻侧 6；BorderRadiuses 为对象接口）；
+    // 尾侧底角：有尾巴时归零（官方 Tail 角语义）
+    const tail: boolean = this.tailVisible();
     const tl: number = !this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
     const tr: number = this.model.isOutgoing && this.model.groupedWithPrev ? s : r;
-    const br: number = this.model.isOutgoing && this.model.groupedWithNext ? s : r;
-    const bl: number = !this.model.isOutgoing && this.model.groupedWithNext ? s : r;
+    const br: number = (this.model.isOutgoing && this.model.groupedWithNext) ||
+      (this.model.isOutgoing && tail) ? s : r;
+    const bl: number = (!this.model.isOutgoing && this.model.groupedWithNext) ||
+      (!this.model.isOutgoing && tail) ? s : r;
+    if (this.model.isOutgoing && tail) {
+      const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: 0, bottomLeft: bl };
+      return radius;
+    }
+    if (!this.model.isOutgoing && tail) {
+      const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: 0 };
+      return radius;
+    }
     const radius: BorderRadiuses = { topLeft: tl, topRight: tr, bottomRight: br, bottomLeft: bl };
     return radius;
   }
