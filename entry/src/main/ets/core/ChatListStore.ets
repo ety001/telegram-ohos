@@ -167,6 +167,23 @@ export class ChatListStore {
     return this.readNumber(small, TdField.ID);
   }
 
+  /** 头像大图 file id（chatPhotoInfo.big.id；资料页 96vp 用；无头像返回 0） */
+  getAvatarBigFileId(chatId: number): number {
+    const chat: Record<string, Object> | undefined = this.chatById.get(chatId);
+    if (chat === undefined) {
+      return 0;
+    }
+    const photo: Record<string, Object> | null = this.asRecord(chat[TdField.PHOTO]);
+    if (photo === null) {
+      return 0;
+    }
+    const big: Record<string, Object> | null = this.asRecord(photo[TdField.BIG]);
+    if (big === null) {
+      return 0;
+    }
+    return this.readNumber(big, TdField.ID);
+  }
+
   /** 头像 minithumbnail 裸 base64（无返回空串；未下载完成时的先行灰度显示） */
   getAvatarMini(chatId: number): string {
     const chat: Record<string, Object> | undefined = this.chatById.get(chatId);

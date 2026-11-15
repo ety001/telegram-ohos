@@ -95,6 +95,9 @@ export class TdReq {
   // 导航件（M7-E）
   // 1.8.63 schema：getChatMessageByDate(chat_id:int53, date:int32) = Message（跳转日期）
   static readonly GET_CHAT_MESSAGE_BY_DATE: string = 'getChatMessageByDate';
+  // 资料页（M7-G）
+  // 1.8.63 schema：getUserFullInfo(user_id:int53) = UserFullInfo（bio/共同群数）
+  static readonly GET_USER_FULL_INFO: string = 'getUserFullInfo';
 }
 
 export class TdUpdate {
@@ -385,6 +388,11 @@ export class TdField {
   static readonly FROM_CACHE: string = 'from_cache';
   static readonly LAST_READ_OUTBOX_MESSAGE_ID: string = 'last_read_outbox_message_id';
   static readonly LAST_READ_INBOX_MESSAGE_ID: string = 'last_read_inbox_message_id';
+  // 资料页（M7-G；chatPhotoInfo.big / userFullInfo / user 字段）
+  static readonly BIG: string = 'big';
+  static readonly BIO: string = 'bio';
+  static readonly PHONE_NUMBER: string = 'phone_number';
+  static readonly GROUP_IN_COMMON_COUNT: string = 'group_in_common_count';
   // 通知免打扰判定（M3-notifications；chat.notification_settings.mute_for，1.8.63 schema：
   // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
   static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';
