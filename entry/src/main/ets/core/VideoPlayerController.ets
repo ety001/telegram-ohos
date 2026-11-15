@@ -122,6 +122,18 @@ export class VideoPlayerController {
     this.applySurfaceIfReady();
   }
 
+  /** seek 到指定位置（prepared/playing/paused/completed 态有效；M7-F1 进度条） */
+  seek(positionMs: number): void {
+    const player: media.AVPlayer | null = this.player;
+    if (player === null || this.releasing) {
+      return;
+    }
+    if (this.state === PlayerState.PLAYING || this.state === PlayerState.PAUSED ||
+      this.state === PlayerState.COMPLETED) {
+      player.seek(Math.max(0, Math.floor(positionMs)));
+    }
+  }
+
   /** 播放/暂停切换（prepared/playing/paused/completed 态可用） */
   toggle(): void {
     const player: media.AVPlayer | null = this.player;
