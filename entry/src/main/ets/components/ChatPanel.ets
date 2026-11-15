@@ -253,6 +253,7 @@ export struct ChatPanel {
     this.pendingJumpId = 0;
     this.clearMentions();
     this.exitSelection();
+    this.showScrollDown = false; // PR33 审计 P2：切会话浮钮归零
     // 搜索态归零（M6-5）：结果与输入属旧会话
     this.searchQuery = '';
     this.searchHits = [];
@@ -659,9 +660,15 @@ export struct ChatPanel {
       return;
     }
     this.actionSeq += 1;
-    const extra: string = `byDate_${this.actionSeq}`;
+    const seq: number = this.actionSeq;
+    const srcChatId: number = this.chatId;
+    const extra: string = `byDate_${seq}`;
     TdUpdateRouter.getInstance().waitForExtra(extra, 10000)
       .then((update: Record<string, Object>): void => {
+        // 守卫（PR33 审计 P1-1）：跳日期后换会话/更新请求，迟到响应丢弃
+        if (seq !== this.actionSeq || srcChatId !== this.chatId) {
+          return;
+        }
         const typeObj: Object | undefined = update['@type'];
         const chatId: number = ChatPanel.readNumber(update, TdField.CHAT_ID);
         const id: number = ChatPanel.readNumber(update, TdField.ID);
