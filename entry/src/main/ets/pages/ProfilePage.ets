@@ -113,6 +113,13 @@ struct ProfilePage {
   private readonly userObserver: () => void = (): void => {
     this.refreshUserRows();
   };
+  // 会话对象变化（M7-P：updateChatPhoto 换头像后刷新 file id——PR36 审计 P2-③）
+  private readonly chatObserver: () => void = (): void => {
+    this.bigFileId = ChatListStore.getInstance().getAvatarBigFileId(this.chatId);
+    this.smallFileId = ChatListStore.getInstance().getAvatarFileId(this.chatId);
+    this.avatarMini = ChatListStore.getInstance().getAvatarMini(this.chatId);
+    this.chatTitle = ChatListStore.getInstance().getTitle(this.chatId);
+  };
 
   aboutToAppear(): void {
     const params: Record<string, Object> | undefined =
@@ -133,11 +140,13 @@ struct ProfilePage {
     }
     this.refreshUserRows();
     UserStore.getInstance().addObserver(this.userObserver);
+    ChatListStore.getInstance().addObserver(this.chatObserver);
     this.queryFullInfo(userId);
   }
 
   aboutToDisappear(): void {
     UserStore.getInstance().removeObserver(this.userObserver);
+    ChatListStore.getInstance().removeObserver(this.chatObserver);
   }
 
   build() {

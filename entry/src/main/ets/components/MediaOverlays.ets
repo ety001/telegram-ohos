@@ -239,6 +239,9 @@ export struct VideoPlayCover {
           max: this.durationMs > 0 ? this.durationMs : 1,
           step: 500
         })
+          .enabled(this.playerState === PlayerState.PLAYING ||
+            this.playerState === PlayerState.PAUSED ||
+            this.playerState === PlayerState.COMPLETED) // PR34 审计 P2-a：未就绪禁拖
           .blockColor(ChatUi.ACCENT)
           .selectedColor(ChatUi.ACCENT)
           .trackColor('#40FFFFFF')
@@ -254,6 +257,7 @@ export struct VideoPlayCover {
           Stack({ alignContent: Alignment.Center }) {
             Circle({ width: 38, height: 38 })
               .fill(this.playerState === PlayerState.ERROR ? '#66333333' : ChatUi.ACCENT)
+              .opacity(this.playerState === PlayerState.ERROR ? 0.5 : 1) // PR34 审计 P2-d
             if (this.playerState === PlayerState.PLAYING) {
               PauseIcon({ iconSize: 13, iconColor: '#FFFFFF' })
             } else {
@@ -298,6 +302,10 @@ export struct VideoPlayCover {
     const total: string = this.durationMs > 0 ? MessageContent.formatDuration(Math.floor(this.durationMs / 1000)) : this.durationText;
     const pos: string = MessageContent.formatDuration(Math.floor(this.positionMs / 1000));
     if (this.playerState === PlayerState.COMPLETED) {
+      // PR34 审计 P2-c：拖回后 position<duration 显示位置
+      if (this.positionMs > 0 && this.positionMs < this.durationMs) {
+        return `${MessageContent.formatDuration(Math.floor(this.positionMs / 1000))} / ${total}`;
+      }
       return total.length > 0 ? `已播完 · ${total}` : '已播完';
     }
     if (this.playerState === PlayerState.PLAYING || this.playerState === PlayerState.PAUSED) {
