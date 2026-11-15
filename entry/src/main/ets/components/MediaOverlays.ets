@@ -12,6 +12,7 @@
 import { VideoPlayerController, PlayerState } from '../core/VideoPlayerController';
 import { MessageContent } from '../core/MessageContent';
 import { ChatUi } from '../pages/ChatUi';
+import { PlayIcon, PauseIcon } from './Icons';
 
 /**
  * XComponentController 子类：surface 创建完成的官方回调通道（API 12+）。
@@ -93,6 +94,10 @@ export struct VideoPlayCover {
   };
   @State playerState: string = PlayerState.IDLE;
   @State durationText: string = '';
+  // 进度（M7-F1）：position/duration 轮询驱动 Slider；拖动 seek
+  @State positionMs: number = 0;
+  @State durationMs: number = 0;
+  private pollTimer: number = -1;
   private controller: VideoPlayerController = new VideoPlayerController();
   private surfaceController: VideoSurfaceController = new VideoSurfaceController();
   private surfaceReady: boolean = false;
@@ -111,6 +116,14 @@ export struct VideoPlayCover {
       this.onSurfaceReady(surfaceId);
     };
     this.controller.open(this.path);
+    // 进度轮询（M7-F1）：500ms 推进 Slider（seek 后由 timeUpdate 误差自愈）
+    this.pollTimer = setInterval((): void => {
+      this.positionMs = Math.max(0, this.controller.getCurrentTimeMs());
+      const dur: number = this.controller.getDurationMs();
+      if (dur > 0) {
+        this.durationMs = dur;
+      }
+    }, 500);
     // surface 就绪附加防御：官方回调缺失时（API 差异）onLoad + 延迟轮询兜底
     this.surfaceFallbackTimer = setTimeout((): void => {
       this.tryBindSurface();
@@ -122,6 +135,10 @@ export struct VideoPlayCover {
     if (this.surfaceFallbackTimer >= 0) {
       clearTimeout(this.surfaceFallbackTimer);
       this.surfaceFallbackTimer = -1;
+    }
+    if (this.pollTimer >= 0) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = -1;
     }
     this.controller.release();
   }
@@ -214,37 +231,59 @@ export struct VideoPlayCover {
       .layoutWeight(1)
       .backgroundColor('#000000')
 
-      // 底部控制条：播放/暂停 + 状态/时长
-      Row({ space: 10 }) {
-        Text(this.playerState === PlayerState.PLAYING ? '❚❚' : '▶')
-          .fontSize(15)
-          .fontColor('#FFFFFF')
+      // 底部控制区（M7-F1）：进度条 seek + 播放/暂停（自绘图标）+ 位置/时长 + 关闭
+      Column() {
+        Slider({
+          value: Math.min(this.positionMs, this.durationMs > 0 ? this.durationMs : this.positionMs),
+          min: 0,
+          max: this.durationMs > 0 ? this.durationMs : 1,
+          step: 500
+        })
+          .blockColor(ChatUi.ACCENT)
+          .selectedColor(ChatUi.ACCENT)
+          .trackColor('#40FFFFFF')
+          .height(20)
+          .onChange((value: number, mode: SliderChangeMode): void => {
+            if (mode === SliderChangeMode.End) {
+              this.controller.seek(value);
+              this.positionMs = value;
+            }
+          })
+
+        Row({ space: 10 }) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle({ width: 38, height: 38 })
+              .fill(this.playerState === PlayerState.ERROR ? '#66333333' : ChatUi.ACCENT)
+            if (this.playerState === PlayerState.PLAYING) {
+              PauseIcon({ iconSize: 13, iconColor: '#FFFFFF' })
+            } else {
+              PlayIcon({ iconSize: 14, iconColor: '#FFFFFF' })
+            }
+          }
           .width(38)
           .height(38)
-          .textAlign(TextAlign.Center)
-          .borderRadius(19)
-          .backgroundColor(this.playerState === PlayerState.ERROR ? '#66333333' : ChatUi.ACCENT)
           .onClick((): void => {
             this.controller.toggle();
           })
-        Text(this.statusText())
-          .fontSize(13)
-          .fontColor('#BFC9D4')
-          .layoutWeight(1)
-        Text('关闭')
-          .fontSize(14)
-          .fontColor('#FFFFFF')
-          .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-          .borderRadius(16)
-          .backgroundColor('#33FFFFFF')
-          .onClick((): void => {
-            this.onClose();
-          })
+          Text(this.statusText())
+            .fontSize(13)
+            .fontColor('#BFC9D4')
+            .layoutWeight(1)
+          Text('关闭')
+            .fontSize(14)
+            .fontColor('#FFFFFF')
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor('#33FFFFFF')
+            .onClick((): void => {
+              this.onClose();
+            })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 10 })
+        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
-      .height(58)
-      .padding({ left: 16, right: 16 })
-      .alignItems(VerticalAlign.Center)
       .backgroundColor('#CC0A0A0A')
     }
     .width('100%')
@@ -256,11 +295,13 @@ export struct VideoPlayCover {
     if (this.playerState === PlayerState.ERROR) {
       return '无法播放该格式';
     }
+    const total: string = this.durationMs > 0 ? MessageContent.formatDuration(Math.floor(this.durationMs / 1000)) : this.durationText;
+    const pos: string = MessageContent.formatDuration(Math.floor(this.positionMs / 1000));
     if (this.playerState === PlayerState.COMPLETED) {
-      return this.durationText.length > 0 ? `已播完 · ${this.durationText}` : '已播完';
+      return total.length > 0 ? `已播完 · ${total}` : '已播完';
     }
     if (this.playerState === PlayerState.PLAYING || this.playerState === PlayerState.PAUSED) {
-      return this.durationText.length > 0 ? `时长 ${this.durationText}` : '播放中';
+      return total.length > 0 ? `${pos} / ${total}` : '播放中';
     }
     return '准备中…';
   }
