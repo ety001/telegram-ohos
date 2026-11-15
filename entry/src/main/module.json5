@@ -22,6 +22,14 @@
       {
         "name": "ohos.permission.PREPARE_APP_TERMINATE",
         "reason": "$string:permission_terminate_reason"
+      },
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:permission_microphone",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
       }
     ],
     "pages": "$profile:main_pages",
