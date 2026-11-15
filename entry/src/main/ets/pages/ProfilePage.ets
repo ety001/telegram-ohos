@@ -10,6 +10,7 @@
  */
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { ChatUi } from './ChatUi';
 import { ChatListStore } from '../core/ChatListStore';
 import { UserStore } from '../core/UserStore';
@@ -267,20 +268,10 @@ struct ProfilePage {
   }
 
   private copyText(text: string): void {
-    const hostContext: Object | undefined = this.getUIContext().getHostContext();
-    if (hostContext === undefined) {
-      return;
-    }
-    const context: common.UIAbilityContext = hostContext as common.UIAbilityContext;
-    try {
-      context.startAbility({
-        action: 'ohos.want.action.copyData',
-        parameters: { 'content': text } as Record<string, Object>
-      }).catch((): void => {
-      });
-    } catch (err) {
-      // 剪贴板能力不可用：静默
-    }
+    // pasteboard 系统剪贴板（仓库正确范式，PR36 审计 P2-1：startAbility copyData 非 OHOS 语义）
+    const data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+    pasteboard.getSystemPasteboard().setData(data).catch((): void => {
+    });
   }
 
   /** 用户行刷新：昵称/用户名/手机/状态（UserStore 缓存） */

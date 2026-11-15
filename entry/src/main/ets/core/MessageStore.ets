@@ -493,14 +493,6 @@ export class MessageStore {
           this.insertMessage(live, tempMessage);
         }
         this.notifyChanged(chatId);
-        // 发送确认后 60s 清理录制临时文件（TDLib 异步上传读取窗口后删；打磨挂账项落地）
-        setTimeout((): void => {
-          try {
-            fileIo.unlinkSync(filePath);
-          } catch (err) {
-            // 已清理：忽略
-          }
-        }, 60000);
       })
       .catch((reason: string): void => {
         this.pendingSends.delete(extra);
@@ -519,6 +511,7 @@ export class MessageStore {
       'input_message_content': inputContent
     };
     request[TdField.EXTRA] = extra;
+    this.pendingVoiceCleanup.set(filePath, chatId.toString()); // 上传完成后清理（PR36 审计 P1）
     TdClient.getInstance().send(request);
   }
 
@@ -548,6 +541,43 @@ export class MessageStore {
     }
     message[TdField.EDIT_DATE] = this.readNumber(update, TdField.EDIT_DATE);
     this.notifyChanged(chatId);
+  };
+
+  // 语音录制临时文件清理（PR36 审计 P1：事件驱动——updateFile
+  // remote.is_uploading_completed=true 且路径匹配 pending 表时删除；原 60s 定时器
+  // 在弱网长上传下会竞态删除导致发送失败）
+  private pendingVoiceCleanup: Map<string, string> = new Map(); // path -> chatId 标记（值无语义，键查重）
+
+  private readonly onVoiceFileUploaded: TdRouteHandler = (update: Record<string, Object>): void => {
+    if (this.pendingVoiceCleanup.size === 0) {
+      return;
+    }
+    const file: Record<string, Object> | null = this.asRecord(update[TdField.FILE]);
+    if (file === null) {
+      return;
+    }
+    const local: Record<string, Object> | null = this.asRecord(file[TdField.LOCAL]);
+    if (local === null) {
+      return;
+    }
+    const path: Object | undefined = local[TdField.PATH];
+    const localPath: string = typeof path === 'string' ? path : '';
+    if (localPath.length === 0 || !this.pendingVoiceCleanup.has(localPath)) {
+      return;
+    }
+    const remote: Record<string, Object> | null = this.asRecord(file['remote']);
+    if (remote === null || remote['is_uploading_completed'] !== true) {
+      return;
+    }
+    this.pendingVoiceCleanup.delete(localPath);
+    setTimeout((): void => {
+      try {
+        fileIo.unlinkSync(localPath);
+      } catch (err) {
+        // 已清理：忽略
+      }
+    }, 3000);
+    hilog.info(LOG_DOMAIN, TAG, 'voice temp cleaned after upload');
   };
 
   // 交互信息变更（M7-D1；PR30 审计 P0-A：updateMessageReactions 为 bot 专用，
@@ -586,6 +616,7 @@ export class MessageStore {
     router.register(TdUpdate.CHAT_READ_OUTBOX, this.onChatReadOutbox);
     router.register(TdUpdate.MESSAGE_EDITED, this.onMessageEdited);
     router.register(TdUpdate.MESSAGE_INTERACTION_INFO, this.onMessageInteractionInfo);
+    router.register(TdUpdate.UPDATE_FILE, this.onVoiceFileUploaded);
     hilog.info(LOG_DOMAIN, TAG, 'started');
   }
 
@@ -601,6 +632,7 @@ export class MessageStore {
     this.caches.clear();
     this.recentChatIds = [];
     this.pendingSends.clear();
+    this.pendingVoiceCleanup.clear();
     this.activeChatId = 0;
     this.started = false;
     for (const chatId of affected) {
