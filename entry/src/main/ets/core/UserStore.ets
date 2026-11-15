@@ -231,6 +231,16 @@ export class UserStore {
     return typeof first === 'string' ? first : '';
   }
 
+  /** 手机号（user.phone_number；隐私设置不公开时为空串） */
+  phoneOf(userId: number): string {
+    const user: Record<string, Object> | undefined = this.users.get(userId);
+    if (user === undefined) {
+      return '';
+    }
+    const value: Object | undefined = user[TdField.PHONE_NUMBER];
+    return typeof value === 'string' ? value : '';
+  }
+
   /** 展示名（first+last；无缓存空串） */
   displayName(userId: number): string {
     const user: Record<string, Object> | undefined = this.users.get(userId);

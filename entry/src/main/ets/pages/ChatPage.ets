@@ -165,7 +165,7 @@ struct ChatPage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .onClick((): void => {
-              router.pushUrl({ url: 'pages/MediaPage', params: { 'chatId': this.chatId } as Record<string, Object> }).catch((): void => {
+              router.pushUrl({ url: 'pages/ProfilePage', params: { 'chatId': this.chatId } as Record<string, Object> }).catch((): void => {
               });
             })
           if (this.statusLine.length > 0) {

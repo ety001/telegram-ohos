@@ -32,6 +32,7 @@
  *
  * 日志红线：消息内容/标题一律不打日志（真机即真实聊天内容），仅记录 chatId/messageId/数量。
  */
+import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { TdClient } from '../tdlib/TdClient';
 import { TdUpdateRouter, TdRouteHandler } from './TdUpdateRouter';
@@ -492,6 +493,14 @@ export class MessageStore {
           this.insertMessage(live, tempMessage);
         }
         this.notifyChanged(chatId);
+        // 发送确认后 60s 清理录制临时文件（TDLib 异步上传读取窗口后删；打磨挂账项落地）
+        setTimeout((): void => {
+          try {
+            fileIo.unlinkSync(filePath);
+          } catch (err) {
+            // 已清理：忽略
+          }
+        }, 60000);
       })
       .catch((reason: string): void => {
         this.pendingSends.delete(extra);
