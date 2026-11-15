@@ -124,6 +124,8 @@ export struct ChatPanel {
   @State searchDone: boolean = false;
   /** 搜索请求序号（PR17 审计 P1：慢响应丢弃，防跨会话/跨查询旧结果覆盖） */
   private searchSeq: number = 0;
+  /** 搜索结果导航游标（M7-P：↑/↓ 钮在命中间跳转） */
+  @State searchHitCursor: number = 0;
   // 输入面板（M7-A1）：'' = 关闭；emoji/贴纸/GIF（A2/A3 扩展）
   @Link panelKind: string;
   // 置顶条跳转请求（M7-D2）：宿主写入目标消息 id，@Watch 触发跳转后归零
@@ -585,6 +587,33 @@ export struct ChatPanel {
               this.runSearch();
             })
         }
+        // 搜索结果导航（M7-P）：↑ N/M ↓（命中 >1 时显示）
+        if (this.searchHits.length > 1) {
+          Text('↑')
+            .fontSize(15)
+            .fontColor(ChatUi.ACCENT)
+            .width(28)
+            .height(32)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => {
+              this.navSearchHit(-1);
+            })
+          Text(`${this.searchHitCursor + 1}/${this.searchHits.length}`)
+            .fontSize(11)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .width(34)
+            .height(32)
+            .textAlign(TextAlign.Center)
+          Text('↓')
+            .fontSize(15)
+            .fontColor(ChatUi.ACCENT)
+            .width(28)
+            .height(32)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => {
+              this.navSearchHit(1);
+            })
+        }
         CalendarIcon({ iconSize: 17, iconColor: ChatUi.ACCENT })
           .width(30)
           .height(32)
@@ -656,6 +685,17 @@ export struct ChatPanel {
     .backgroundColor(ChatUi.LIST_BG)
   }
 
+  /** 搜索结果间跳转（M7-P）：游标循环移动并定位 */
+  private navSearchHit(delta: number): void {
+    const len: number = this.searchHits.length;
+    if (len === 0) {
+      return;
+    }
+    this.searchHitCursor = (this.searchHitCursor + delta + len) % len;
+    const hit: SearchHit = this.searchHits[this.searchHitCursor];
+    this.jumpToMessage(hit.messageId);
+  }
+
   private runSearch(): void {
     const query: string = this.searchQuery.trim();
     if (query.length === 0 || this.chatId === 0) {
@@ -673,6 +713,7 @@ export struct ChatPanel {
         }
         this.searchPending = false;
         this.searchDone = true;
+        this.searchHitCursor = 0;
         const hits: Array<SearchHit> = new Array<SearchHit>();
         for (const message of messages) {
           const hit: SearchHit = new SearchHit();
@@ -748,6 +789,7 @@ export struct ChatPanel {
     this.searchPending = false;
     this.searchDone = false;
     this.searchSeq += 1;
+    this.searchHitCursor = 0;
   }
 
   /** 全屏覆盖层内容（photo：pinch 缩放预览 / video：XComponent + AVPlayer / forward：转发选择器） */

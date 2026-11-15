@@ -459,14 +459,24 @@ export struct MessageBubble {
         }
         if (this.model.mediaKind === MediaKind.PHOTO || this.model.mediaKind === MediaKind.VIDEO) {
           this.mediaBubble()
+          if (this.model.reactionEmojis.length > 0) {
+            this.mediaReactionsRow()
+          }
         } else if (this.model.mediaKind === MediaKind.DOCUMENT) {
           this.documentBubble()
         } else if (this.model.mediaKind === MediaKind.VOICE || this.model.mediaKind === MediaKind.AUDIO) {
           this.voiceBubble()
         } else if (this.model.mediaKind === MediaKind.STICKER) {
           this.stickerBubble()
+          // 媒体类 reactions：独立小胶囊底板（M7-P 补齐不对称）
+          if (this.model.reactionEmojis.length > 0) {
+            this.mediaReactionsRow()
+          }
         } else if (this.model.mediaKind === MediaKind.ANIMATION) {
           this.animationBubble()
+          if (this.model.reactionEmojis.length > 0) {
+            this.mediaReactionsRow()
+          }
         } else {
           this.textBubble()
         }
@@ -605,33 +615,56 @@ export struct MessageBubble {
    * reactions 芯片行（M7-D1）：气泡内底部（时间行上方）；chip = emoji + 计数胶囊，
    * 自己选中高亮描边；点击 chip = 未选→add / 已选→remove（回调宿主走 MessageStore）。
    */
+  /** chips 核心（ForEach 复用：文本气泡内嵌 / 媒体独立底板两种容器） */
+  @Builder
+  reactionChipsCore() {
+    ForEach(this.model.reactionEmojis, (emoji: string, index: number) => {
+      Row({ space: 3 }) {
+        Text(emoji)
+          .fontSize(13)
+        Text(`${this.model.reactionCounts[index]}`)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.model.reactionChosen[index] ? '#FFFFFF' : ChatUi.TEXT_SECONDARY)
+      }
+      .height(24)
+      .padding({ left: 8, right: 8 })
+      .borderRadius(12)
+      .backgroundColor(this.model.reactionChosen[index] ? ChatUi.ACCENT : ChatUi.SEARCH_BG)
+      .onClick((): void => {
+        if (this.selectionMode) {
+          return;
+        }
+        if (this.model.reactionChosen[index]) {
+          this.onReactionRemove(this.model.messageId, emoji);
+        } else {
+          this.onReactionAdd(this.model.messageId, emoji);
+        }
+      })
+    }, (emoji: string, index: number) => `${emoji}_${index}_${this.model.reactionCounts[index]}`)
+  }
+
+  /** 文本/文件/语音气泡：chips 内嵌底板（时间行上方） */
   @Builder
   reactionChipsRow() {
     Row({ space: 4 }) {
-      ForEach(this.model.reactionEmojis, (emoji: string, index: number) => {
-        Row({ space: 3 }) {
-          Text(emoji)
-            .fontSize(13)
-          Text(`${this.model.reactionCounts[index]}`)
-            .fontSize(12)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.model.reactionChosen[index] ? '#FFFFFF' : ChatUi.TEXT_SECONDARY)
-        }
-        .height(24)
-        .padding({ left: 8, right: 8 })
-        .borderRadius(12)
-        .backgroundColor(this.model.reactionChosen[index] ? ChatUi.ACCENT : ChatUi.SEARCH_BG)
-        .onClick((): void => {
-          if (this.model.reactionChosen[index]) {
-            this.onReactionRemove(this.model.messageId, emoji);
-          } else {
-            this.onReactionAdd(this.model.messageId, emoji);
-          }
-        })
-      }, (emoji: string, index: number) => `${emoji}_${index}_${this.model.reactionCounts[index]}`)
+      this.reactionChipsCore()
     }
     .width('100%')
     .padding({ left: 8, top: 4, bottom: 2 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  /** 媒体气泡：chips 独立小胶囊底板（官方媒体反应样式，M7-P 补齐不对称） */
+  @Builder
+  mediaReactionsRow() {
+    Row({ space: 4 }) {
+      this.reactionChipsCore()
+    }
+    .margin({ top: 4 })
+    .padding({ left: 6, right: 6, top: 3, bottom: 3 })
+    .borderRadius(14)
+    .backgroundColor(this.model.isOutgoing ? ChatUi.BUBBLE_OUT : ChatUi.BUBBLE_IN)
     .alignItems(VerticalAlign.Center)
   }
 
