@@ -1475,13 +1475,14 @@ export struct ChatPanel {
   }
 
   private stopRecordingAndSend(): void {
+    const chatId: number = this.chatId; // 快照（PR35 审计 P2-3：发送窗口切会话竞态）
     this.voiceRecorder.stop().then((recording: VoiceRecording | null): void => {
       if (recording === null) {
         this.showToast('录音失败');
         this.recordingState = VoiceRecorderState.IDLE;
         return;
       }
-      MessageStore.getInstance().sendVoiceNote(this.chatId, recording.path, recording.durationSec);
+      MessageStore.getInstance().sendVoiceNote(chatId, recording.path, recording.durationSec);
       this.recordingState = VoiceRecorderState.IDLE;
     });
   }

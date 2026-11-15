@@ -118,6 +118,13 @@ export class VoiceNoteRecorder {
     } catch (err) {
       const be: BusinessError = err as BusinessError;
       hilog.error(LOG_DOMAIN, TAG, 'start failed: %{public}d', be.code);
+      if (this.recorder !== null) {
+        // prepare/start 半途失败：native 实例必须 release（PR35 审计 P1-1）
+        const broken: media.AVRecorder = this.recorder;
+        this.recorder = null;
+        broken.release().catch((): void => {
+        });
+      }
       this.cleanup();
       this.setState(VoiceRecorderState.IDLE);
       return false;
@@ -144,6 +151,9 @@ export class VoiceNoteRecorder {
     } catch (err) {
       const be: BusinessError = err as BusinessError;
       hilog.error(LOG_DOMAIN, TAG, 'stop failed: %{public}d', be.code);
+      // release 失败重试一次（PR35 审计 P1-1：native 泄漏防护）
+      recorder.release().catch((): void => {
+      });
       this.cleanup();
       this.setState(VoiceRecorderState.IDLE);
       return null;
