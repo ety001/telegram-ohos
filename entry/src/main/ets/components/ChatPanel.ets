@@ -267,6 +267,7 @@ export struct ChatPanel {
     this.clearMentions();
     this.exitSelection();
     this.showScrollDown = false; // PR33 审计 P2：切会话浮钮归零
+    this.searchHitCursor = 0; // PR37 审计 P2：搜索导航游标随会话归零
     if (this.recordingState === VoiceRecorderState.RECORDING ||
       this.recordingState === VoiceRecorderState.PROCESSING) {
       this.voiceRecorder.abortIfRecording(); // 切会话强停丢弃（M7-F2）
