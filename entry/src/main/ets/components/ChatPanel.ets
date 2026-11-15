@@ -36,10 +36,12 @@ import { picker } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { KeyCode } from '@kit.InputKit';
 import { promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { VideoPlayCover } from './MediaOverlays';
 import { MediaViewer, ViewerPhoto } from './MediaViewer';
 import { ForwardPicker } from './ForwardPicker';
-import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon, DownIcon, CalendarIcon } from './Icons';
+import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon, DownIcon, CalendarIcon, MicIcon } from './Icons';
+import { VoiceNoteRecorder, VoiceRecorderState, VoiceRecording } from '../core/VoiceNoteRecorder';
 import { InputPanel, PanelKind } from './InputPanel';
 import { StickerStore } from '../core/StickerStore';
 import { TdClient } from '../tdlib/TdClient';
@@ -134,6 +136,10 @@ export struct ChatPanel {
   // 导航件（M7-E）：未读分隔线是否展示 + 浮动回底钮可见性
   @State showUnreadDivider: boolean = false;
   @State showScrollDown: boolean = false;
+  // 语音录制（M7-F2）：recording 态替换输入区（计时 + 取消/发送）
+  @State recordingState: string = 'idle';
+  @State recordingSec: number = 0;
+  private voiceRecorder: VoiceNoteRecorder = new VoiceNoteRecorder();
   // @mention 补全（M7-A3）：命中成员并行数组（userId/name/username）
   @State mentionUserIds: Array<number> = [];
   @State mentionNames: Array<string> = [];
@@ -178,6 +184,10 @@ export struct ChatPanel {
   };
 
   aboutToAppear(): void {
+    this.voiceRecorder.setStateListener((state: string, durationSec: number): void => {
+      this.recordingState = state;
+      this.recordingSec = durationSec;
+    });
     MessageStore.getInstance().addObserver(this.storeObserver);
     ChatListStore.getInstance().addObserver(this.chatObserver);
     UserStore.getInstance().addObserver(this.userObserver);
@@ -185,6 +195,7 @@ export struct ChatPanel {
   }
 
   aboutToDisappear(): void {
+    this.voiceRecorder.abortIfRecording(); // 销毁兜底：录音中强停丢弃
     MessageStore.getInstance().removeObserver(this.storeObserver);
     ChatListStore.getInstance().removeObserver(this.chatObserver);
     UserStore.getInstance().removeObserver(this.userObserver);
@@ -254,6 +265,10 @@ export struct ChatPanel {
     this.clearMentions();
     this.exitSelection();
     this.showScrollDown = false; // PR33 审计 P2：切会话浮钮归零
+    if (this.recordingState === VoiceRecorderState.RECORDING ||
+      this.recordingState === VoiceRecorderState.PROCESSING) {
+      this.voiceRecorder.abortIfRecording(); // 切会话强停丢弃（M7-F2）
+    }
     // 搜索态归零（M6-5）：结果与输入属旧会话
     this.searchQuery = '';
     this.searchHits = [];
@@ -433,7 +448,43 @@ export struct ChatPanel {
           }
         })
       }
-      if (this.selectionMode) {
+      if (this.recordingState === VoiceRecorderState.RECORDING ||
+        this.recordingState === VoiceRecorderState.PROCESSING) {
+        // 录制条（M7-F2）：红点 + 计时 + 取消 / 发送
+        Row({ space: 12 }) {
+          Circle({ width: 10, height: 10 })
+            .fill(ChatUi.BUBBLE_ERROR)
+          Text(this.formatRecordingTime(this.recordingSec))
+            .fontSize(15)
+            .fontColor(ChatUi.TEXT_PRIMARY)
+            .layoutWeight(1)
+          Text('取消')
+            .fontSize(14)
+            .fontColor(ChatUi.TEXT_SECONDARY)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor(ChatUi.SEARCH_BG)
+            .onClick((): void => {
+              this.cancelRecording();
+            })
+          Text(this.recordingState === VoiceRecorderState.PROCESSING ? '处理中…' : '发送')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFFFFF')
+            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+            .borderRadius(16)
+            .backgroundColor(ChatUi.ACCENT)
+            .opacity(this.recordingState === VoiceRecorderState.RECORDING ? 1 : 0.5)
+            .onClick((): void => {
+              this.stopRecordingAndSend();
+            })
+        }
+        .width('100%')
+        .constraintSize({ minHeight: 60 })
+        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(ChatUi.LIST_BG)
+      } else if (this.selectionMode) {
         // 批量操作条（M7-D3）：转发(N) / 删除(N) / 取消——替换输入区
         Row({ space: 12 }) {
           Text(`已选 ${this.selectedIds.length}`)
@@ -966,7 +1017,7 @@ export struct ChatPanel {
             }
           })
 
-        // 官方交互：输入空显示笑脸（开/关面板），非空切换发送钮（M7-A1）
+        // 官方交互：输入空显示笑脸（开/关面板）+ 麦克风（M7-F2），非空切换发送钮
         if (this.inputText.trim().length === 0) {
           Column({ space: 0 }) {
             SmileIcon({
@@ -981,6 +1032,12 @@ export struct ChatPanel {
           .onClick((): void => {
             this.togglePanel();
           })
+          MicIcon({ iconSize: 20, iconColor: '#6C7883' })
+            .width(44)
+            .height(44)
+            .onClick((): void => {
+              this.startRecording();
+            })
         } else {
           Column({ space: 0 }) {
             SendIcon({ iconSize: 18, iconColor: ChatUi.ACCENT }) // historySendIconFg
@@ -1382,6 +1439,52 @@ export struct ChatPanel {
   /** 跳转请求消费回调（M7-D2：宿主归零 jumpRequest） */
   onJumpConsumed: () => void = (): void => {
   };
+
+  // ---------------- 语音录制（M7-F2） ----------------
+
+  private formatRecordingTime(sec: number): string {
+    const minutes: number = Math.floor(sec / 60);
+    const rest: number = sec % 60;
+    return `${minutes}:${rest < 10 ? '0' : ''}${rest}`;
+  }
+
+  /** 开始录制：麦克风授权 → avRecorder 启动；拒绝/失败 toast 降级 */
+  private async startRecording(): Promise<void> {
+    if (this.chatId === 0) {
+      return;
+    }
+    const hostContext: Object | undefined = this.getUIContext().getHostContext();
+    if (hostContext === undefined) {
+      return;
+    }
+    const context: common.UIAbilityContext = hostContext as common.UIAbilityContext;
+    const granted: boolean = await this.voiceRecorder.requestPermission(context);
+    if (!granted) {
+      this.showToast('需要麦克风权限才能录制语音');
+      return;
+    }
+    const ok: boolean = await this.voiceRecorder.start(context);
+    if (!ok) {
+      this.showToast('录音启动失败');
+    }
+  }
+
+  private cancelRecording(): void {
+    this.voiceRecorder.cancel();
+    this.recordingState = VoiceRecorderState.IDLE;
+  }
+
+  private stopRecordingAndSend(): void {
+    this.voiceRecorder.stop().then((recording: VoiceRecording | null): void => {
+      if (recording === null) {
+        this.showToast('录音失败');
+        this.recordingState = VoiceRecorderState.IDLE;
+        return;
+      }
+      MessageStore.getInstance().sendVoiceNote(this.chatId, recording.path, recording.durationSec);
+      this.recordingState = VoiceRecorderState.IDLE;
+    });
+  }
 
   /** 面板开关（M7-A1）：展开时收起软键盘（focusController 清焦，失败静默） */
   private togglePanel(): void {

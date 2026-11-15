@@ -280,3 +280,42 @@ export struct CalendarIcon {
     .height(this.iconSize)
   }
 }
+
+/** 麦克风（录制语音入口；胶囊头 + 支架弧 + 竖杆底座） */
+@Component
+export struct MicIcon {
+  iconSize: number = 20;
+  iconColor: string = '#F5F5F5';
+  lineWidth: number = 1.8;
+
+  build() {
+    Stack() {
+      // 胶囊头
+      Rect()
+        .width(this.iconSize * 0.34)
+        .height(this.iconSize * 0.52)
+        .radius(this.iconSize * 0.17)
+        .fill(this.iconColor)
+        .translate({ y: -this.iconSize * 0.2 })
+      // 支架弧
+      Path()
+        .width(this.iconSize * 0.56)
+        .height(this.iconSize * 0.34)
+        .commands(`M${this.iconSize * 0.03} ${this.iconSize * 0.06} L${this.iconSize * 0.03} ${this.iconSize * 0.14} C ${this.iconSize * 0.03} ${this.iconSize * 0.28} ${this.iconSize * 0.53} ${this.iconSize * 0.28} ${this.iconSize * 0.53} ${this.iconSize * 0.14} L${this.iconSize * 0.53} ${this.iconSize * 0.06}`)
+        .fillOpacity(0)
+        .stroke(this.iconColor)
+        .strokeWidth(this.lineWidth)
+        .strokeLineCap(LineCapStyle.Round)
+        .translate({ y: this.iconSize * 0.08 })
+      // 竖杆
+      Rect()
+        .width(this.lineWidth)
+        .height(this.iconSize * 0.16)
+        .radius(this.lineWidth / 2)
+        .fill(this.iconColor)
+        .translate({ y: this.iconSize * 0.4 })
+    }
+    .width(this.iconSize)
+    .height(this.iconSize)
+  }
+}

@@ -440,6 +440,79 @@ export class MessageStore {
       `${chatId}`, `${messageId}`, `${pinned}`);
   }
 
+  /**
+   * 发送语音消息（M7-F2）：本地占位（时长气泡）→ sendMessage +
+   * inputMessageVoiceNote{voice_note:inputFileLocal{录制文件}, duration}——
+   * waveform 服务端生成下发（入参 schema 允许缺省，客户端不传）。
+   */
+  sendVoiceNote(chatId: number, filePath: string, durationSec: number): void {
+    if (chatId === 0 || filePath.length === 0 || durationSec <= 0 || !this.started) {
+      return;
+    }
+    this.localIdSeq += 1;
+    const localId: number = LOCAL_ID_BASE - this.localIdSeq;
+    const placeholderContent: Record<string, Object> = {
+      ['@type']: TdMessageContent.VOICE_NOTE,
+      'voice_note': { ['@type']: 'voiceNote', 'duration': durationSec } as Record<string, Object>
+    };
+    const sendingState: Record<string, Object> = { ['@type']: TdSendingState.PENDING };
+    const placeholder: Record<string, Object> = {
+      'id': localId,
+      'chat_id': chatId,
+      'is_outgoing': true,
+      'date': Math.floor(Date.now() / 1000),
+      'content': placeholderContent,
+      'sending_state': sendingState
+    };
+    const cache: ChatMessageCache = this.ensureCache(chatId);
+    this.insertMessage(cache, placeholder);
+    hilog.info(LOG_DOMAIN, TAG, 'sendVoiceNote: chat=%{public}s dur=%{public}d', `${chatId}`, durationSec);
+
+    this.actionSeq += 1;
+    const extra: string = `sendVoice_${this.actionSeq}`;
+    const pending: PendingSend = { chatId: chatId, localId: localId, text: `[语音]` };
+    this.pendingSends.set(extra, pending);
+    TdUpdateRouter.getInstance().waitForExtra(extra, SEND_TIMEOUT_MS)
+      .then((update: Record<string, Object>): void => {
+        this.pendingSends.delete(extra);
+        const typeObj: Object | undefined = update[TdField.TYPE];
+        const type: string = typeof typeObj === 'string' ? typeObj as string : '';
+        if (type === ErrorType.INVALID) {
+          this.markPlaceholderFailed(chatId, localId, '发送失败');
+          this.notifyChanged(chatId);
+          return;
+        }
+        const live: ChatMessageCache | undefined = this.caches.get(chatId);
+        if (live === undefined) {
+          return;
+        }
+        this.removeById(live, localId);
+        const tempMessage: Record<string, Object> | null = this.asRecord(update);
+        if (tempMessage !== null) {
+          this.insertMessage(live, tempMessage);
+        }
+        this.notifyChanged(chatId);
+      })
+      .catch((reason: string): void => {
+        this.pendingSends.delete(extra);
+        this.markPlaceholderFailed(chatId, localId, '发送超时');
+        this.notifyChanged(chatId);
+      });
+    const voiceFile: Record<string, Object> = { ['@type']: 'inputFileLocal', 'path': filePath };
+    const inputContent: Record<string, Object> = {
+      ['@type']: 'inputMessageVoiceNote',
+      'voice_note': voiceFile,
+      'duration': durationSec
+    };
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.SEND_MESSAGE,
+      'chat_id': chatId,
+      'input_message_content': inputContent
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
+  }
+
   /** 语音已听上报（M6-6）：openMessageContent——is_listened 由 updateMessageContent 刷新 */
   reportListened(chatId: number, messageId: number): void {
     if (chatId === 0 || messageId <= 0 || !this.started) {
