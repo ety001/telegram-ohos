@@ -92,6 +92,9 @@ export class TdReq {
   static readonly PIN_CHAT_MESSAGE: string = 'pinChatMessage';
   // 1.8.63 schema：unpinChatMessage(chat_id, message_id) = Ok
   static readonly UNPIN_CHAT_MESSAGE: string = 'unpinChatMessage';
+  // 导航件（M7-E）
+  // 1.8.63 schema：getChatMessageByDate(chat_id:int53, date:int32) = Message（跳转日期）
+  static readonly GET_CHAT_MESSAGE_BY_DATE: string = 'getChatMessageByDate';
 }
 
 export class TdUpdate {
@@ -114,6 +117,7 @@ export class TdUpdate {
   static readonly OPTION_VALUE_STRING: string = 'optionValueString';
   // getChat 的结果对象（@type=chat，chats 结果缺项时的补拉响应）
   static readonly CHAT_RESULT: string = 'chat';
+  static readonly FOUND_MESSAGE: string = 'message'; // getChatMessageByDate 结果对象
   // 消息收发（M3）
   static readonly NEW_MESSAGE: string = 'updateNewMessage';
   static readonly MESSAGE_SEND_SUCCEEDED: string = 'updateMessageSendSucceeded';
@@ -380,6 +384,7 @@ export class TdField {
   static readonly REVOKE: string = 'revoke';
   static readonly FROM_CACHE: string = 'from_cache';
   static readonly LAST_READ_OUTBOX_MESSAGE_ID: string = 'last_read_outbox_message_id';
+  static readonly LAST_READ_INBOX_MESSAGE_ID: string = 'last_read_inbox_message_id';
   // 通知免打扰判定（M3-notifications；chat.notification_settings.mute_for，1.8.63 schema：
   // chatNotificationSettings.mute_for:int32，>0 即静音中，TDLib 周期性刷新该值）
   static readonly NOTIFICATION_SETTINGS: string = 'notification_settings';

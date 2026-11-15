@@ -21,7 +21,7 @@
  */
 import { MessageStore, MessageStoreObserver } from '../core/MessageStore';
 import { TimeFormat } from '../core/TimeFormat';
-import { TdField, TdMessageContent, TdSendingState, TdType, TdReq } from '../core/TdConstants';
+import { TdField, TdMessageContent, TdSendingState, TdType, TdReq , TdUpdate} from '../core/TdConstants';
 import { RichSegment, RichText } from '../core/RichText';
 import { ChatUi } from '../pages/ChatUi';
 import { MessageBubble, MessageBubbleModel, BubbleSendState } from './MessageBubble';
@@ -29,7 +29,7 @@ import { MessageContent, MediaKind, PhotoInfo, VideoInfo, DocumentInfo, VoiceInf
 import { FileDownloadStore, DownloadPriority } from '../core/FileDownloadStore';
 import { NotificationService } from '../core/NotificationService';
 import { DraftStore } from '../core/DraftStore';
-import { ChatListStore } from '../core/ChatListStore';
+import { ChatListStore, ChatListObserver } from '../core/ChatListStore';
 import { UserStore } from '../core/UserStore';
 import { AuthService, AppAuthState } from '../core/AuthService';
 import { picker } from '@kit.CoreFileKit';
@@ -39,7 +39,7 @@ import { promptAction } from '@kit.ArkUI';
 import { VideoPlayCover } from './MediaOverlays';
 import { MediaViewer, ViewerPhoto } from './MediaViewer';
 import { ForwardPicker } from './ForwardPicker';
-import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon } from './Icons';
+import { PlusIcon, SendIcon, SearchIcon, CloseIcon, SmileIcon, DownIcon, CalendarIcon } from './Icons';
 import { InputPanel, PanelKind } from './InputPanel';
 import { StickerStore } from '../core/StickerStore';
 import { TdClient } from '../tdlib/TdClient';
@@ -74,9 +74,10 @@ class SearchHit {
   isOutgoing: boolean = false;
 }
 
-/** 消息流条目：分组头 / 气泡（单类 + isHeader 区分，规避 ArkTS 联合类型限制） */
+/** 消息流条目：分组头 / 未读分隔条 / 气泡（单类 + isHeader/isDivider 区分） */
 class ChatEntryModel {
   isHeader: boolean = false;
+  isDivider: boolean = false;
   /** ForEach 键：内容/状态变化即变键，强制重建对应气泡（编辑/状态机的可见刷新） */
   key: string = '';
   headerText: string = '';
@@ -130,6 +131,9 @@ export struct ChatPanel {
   // 多选批量（M7-D3）：selectionMode 下气泡点击切换选中；底栏批量转发/删除
   @State selectionMode: boolean = false;
   @State selectedIds: Array<number> = [];
+  // 导航件（M7-E）：未读分隔线是否展示 + 浮动回底钮可见性
+  @State showUnreadDivider: boolean = false;
+  @State showScrollDown: boolean = false;
   // @mention 补全（M7-A3）：命中成员并行数组（userId/name/username）
   @State mentionUserIds: Array<number> = [];
   @State mentionNames: Array<string> = [];
@@ -141,6 +145,7 @@ export struct ChatPanel {
   private highlightTimer: number = -1;
   /** 待跳转消息（目标不在已加载窗口时先 loadAround 再定位；rebuild 内消费） */
   private pendingJumpId: number = 0;
+  private actionSeq: number = 0;
   private scroller: Scroller = new Scroller();
   /** 已 activate 的会话 id（@Watch 换会话时先 deactivate，@Watch 回调不提供旧值故自记） */
   private activatedChatId: number = 0;
@@ -163,6 +168,10 @@ export struct ChatPanel {
       this.rebuild();
     }
   };
+  // 会话对象变化（M7-E：已读游标推进使未读分隔条消退；置顶/未读数联动刷新）
+  private readonly chatObserver: ChatListObserver = (): void => {
+    this.rebuild();
+  };
   // 用户对象/昵称到达（UI 打磨）：群聊发送者昵称异步补齐后重建刷新
   private readonly userObserver: () => void = (): void => {
     this.rebuild();
@@ -170,12 +179,14 @@ export struct ChatPanel {
 
   aboutToAppear(): void {
     MessageStore.getInstance().addObserver(this.storeObserver);
+    ChatListStore.getInstance().addObserver(this.chatObserver);
     UserStore.getInstance().addObserver(this.userObserver);
     this.switchChat();
   }
 
   aboutToDisappear(): void {
     MessageStore.getInstance().removeObserver(this.storeObserver);
+    ChatListStore.getInstance().removeObserver(this.chatObserver);
     UserStore.getInstance().removeObserver(this.userObserver);
     if (this.mentionTimer >= 0) {
       clearTimeout(this.mentionTimer); // 销毁清防抖（PR26 审计 P2-2：孤儿请求）
@@ -242,6 +253,7 @@ export struct ChatPanel {
     this.pendingJumpId = 0;
     this.clearMentions();
     this.exitSelection();
+    this.showScrollDown = false; // PR33 审计 P2：切会话浮钮归零
     // 搜索态归零（M6-5）：结果与输入属旧会话
     this.searchQuery = '';
     this.searchHits = [];
@@ -277,11 +289,14 @@ export struct ChatPanel {
       if (this.entries.length === 0) {
         this.emptyState()
       } else {
+        Stack({ alignContent: Alignment.BottomEnd }) {
         List({ space: 0, scroller: this.scroller }) {
           ForEach(this.entries, (entry: ChatEntryModel) => {
             ListItem() {
               if (entry.isHeader) {
                 this.dayHeader(entry)
+              } else if (entry.isDivider) {
+                this.unreadDivider()
               } else if (entry.bubble !== null) {
                 MessageBubble({
                   model: entry.bubble,
@@ -349,7 +364,26 @@ export struct ChatPanel {
         })
         .onScrollIndex((first: number, last: number): void => {
           this.firstVisibleIndex = first;
+          // 浮动回底钮（M7-E）：非底部时可见
+          this.showScrollDown = last < this.entries.length - 1;
         })
+
+        // 浮动回底钮（M7-E）：右下圆形，点击滚到底部
+        if (this.showScrollDown) {
+          Stack({ alignContent: Alignment.Center }) {
+            Circle({ width: 40, height: 40 })
+              .fill(ChatUi.LIST_BG)
+              .shadow({ radius: 6, color: '#40000000', offsetY: 1 })
+            DownIcon({ iconSize: 18, iconColor: ChatUi.TEXT_PRIMARY })
+          }
+          .width(40)
+          .height(40)
+          .margin({ right: 12, bottom: 12 })
+          .onClick((): void => {
+            this.scrollAfterRender(this.entries.length - 1, ScrollAlign.END);
+          })
+        }
+        }
       }
       // @mention 补全浮层（M7-A3）：输入区上方，≤6 条
       if (this.mentionUserIds.length > 0) {
@@ -500,6 +534,12 @@ export struct ChatPanel {
               this.runSearch();
             })
         }
+        CalendarIcon({ iconSize: 17, iconColor: ChatUi.ACCENT })
+          .width(30)
+          .height(32)
+          .onClick((): void => {
+            this.showJumpToDate();
+          })
         CloseIcon({ iconSize: 14, iconColor: ChatUi.TEXT_SECONDARY })
           .width(30)
           .height(32)
@@ -597,6 +637,57 @@ export struct ChatPanel {
         }
         this.searchHits = hits;
       });
+  }
+
+  /** 跳转日期（M7-E）：日期选择 → getChatMessageByDate → 定位该日最后一条消息 */
+  private showJumpToDate(): void {
+    this.getUIContext().showDatePickerDialog({
+      start: new Date('2000-01-01'),
+      end: new Date(),
+      selected: new Date(),
+      onDateAccept: (value: Date): void => {
+        // 取当日 23:59:59（本地时区秒级）——定位到该日最后一条消息
+        const endOfDay: Date = new Date(value.getFullYear(), value.getMonth(), value.getDate(),
+          23, 59, 59);
+        const unix: number = Math.floor(endOfDay.getTime() / 1000);
+        this.queryByDate(unix);
+      }
+    });
+  }
+
+  private queryByDate(unixSeconds: number): void {
+    if (this.chatId === 0) {
+      return;
+    }
+    this.actionSeq += 1;
+    const seq: number = this.actionSeq;
+    const srcChatId: number = this.chatId;
+    const extra: string = `byDate_${seq}`;
+    TdUpdateRouter.getInstance().waitForExtra(extra, 10000)
+      .then((update: Record<string, Object>): void => {
+        // 守卫（PR33 审计 P1-1）：跳日期后换会话/更新请求，迟到响应丢弃
+        if (seq !== this.actionSeq || srcChatId !== this.chatId) {
+          return;
+        }
+        const typeObj: Object | undefined = update['@type'];
+        const chatId: number = ChatPanel.readNumber(update, TdField.CHAT_ID);
+        const id: number = ChatPanel.readNumber(update, TdField.ID);
+        if (typeObj === TdUpdate.FOUND_MESSAGE || (chatId === this.chatId && id > 0)) {
+          this.jumpToMessage(id);
+          return;
+        }
+        this.showToast('该日期没有消息');
+      })
+      .catch((reason: string): void => {
+        this.showToast('该日期没有消息');
+      });
+    const request: Record<string, Object> = {
+      ['@type']: TdReq.GET_CHAT_MESSAGE_BY_DATE,
+      'chat_id': this.chatId,
+      'date': unixSeconds
+    };
+    request[TdField.EXTRA] = extra;
+    TdClient.getInstance().send(request);
   }
 
   private closeSearch(): void {
@@ -722,6 +813,29 @@ export struct ChatPanel {
     .width('100%')
     .layoutWeight(1)
     .justifyContent(FlexAlign.Center)
+  }
+
+  /** 未读分隔条（M7-E，官方未读条 32px 语义）：两侧细线 + 强调色文案 */
+  @Builder
+  unreadDivider() {
+    Row({ space: 10 }) {
+      Divider()
+        .layoutWeight(1)
+        .color(ChatUi.ACCENT)
+        .strokeWidth(1)
+      Text('未读消息')
+        .fontSize(12)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(ChatUi.ACCENT)
+      Divider()
+        .layoutWeight(1)
+        .color(ChatUi.ACCENT)
+        .strokeWidth(1)
+    }
+    .width('100%')
+    .height(32)
+    .padding({ left: 16, right: 16, top: 6 })
+    .alignItems(VerticalAlign.Center)
   }
 
   /** 按天分组头（UI 打磨：左对齐小胶囊——用户反馈日期信息不要居中） */
@@ -1465,6 +1579,20 @@ export struct ChatPanel {
     for (const message of messages) {
       bubbles.push(this.buildBubble(message));
     }
+    // 未读分隔线（M7-E）：会话有未读且窗口内存在 id > 已读游标的正数消息 → 首条前插分隔条
+    const chat: Record<string, Object> | undefined = ChatListStore.getInstance().getChat(this.chatId);
+    const lastReadInbox: number = chat === undefined ? 0 : ChatPanel.readNumber(chat, TdField.LAST_READ_INBOX_MESSAGE_ID);
+    const unreadCount: number = ChatListStore.getInstance().getUnreadCount(this.chatId);
+    this.showUnreadDivider = false;
+    let dividerInserted = false;
+    if (unreadCount > 0 && lastReadInbox > 0) {
+      for (const bubble of bubbles) {
+        if (bubble.messageId > lastReadInbox) {
+          this.showUnreadDivider = true;
+          break;
+        }
+      }
+    }
     const dayKeys: Array<number> = new Array<number>();
     for (const bubble of bubbles) {
       dayKeys.push(bubble.dayKey);
@@ -1493,6 +1621,14 @@ export struct ChatPanel {
         header.headerText = TimeFormat.formatDayLabel(bubble.dateSeconds, Date.now());
         entries.push(header);
         lastDayKey = bubble.dayKey;
+      }
+      // 未读分隔条（M7-E）：首条未读正数消息前插入（一次性）
+      if (this.showUnreadDivider && !dividerInserted && bubble.messageId > lastReadInbox) {
+        const divider: ChatEntryModel = new ChatEntryModel();
+        divider.isDivider = true;
+        divider.key = 'unreadDivider';
+        entries.push(divider);
+        dividerInserted = true;
       }
       const item: ChatEntryModel = new ChatEntryModel();
       // 多选标志（M7-D3）：回填进模型（keySuffix 含 selected/selectionMode，勾选变化驱动重建）

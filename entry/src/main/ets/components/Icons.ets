@@ -217,3 +217,66 @@ export struct SmileIcon {
     .height(this.iconSize)
   }
 }
+
+/** 下箭头 ↓（浮动回底钮；竖线 + 箭头折线） */
+@Component
+export struct DownIcon {
+  iconSize: number = 18;
+  iconColor: string = '#F5F5F5';
+  lineWidth: number = 2;
+
+  build() {
+    Stack() {
+      Path()
+        .width(this.iconSize * 0.6)
+        .height(this.iconSize)
+        .commands(`M${this.iconSize * 0.3} ${this.iconSize * 0.08} L${this.iconSize * 0.3} ${this.iconSize * 0.82} M${this.iconSize * 0.08} ${this.iconSize * 0.6} L${this.iconSize * 0.3} ${this.iconSize * 0.86} L${this.iconSize * 0.52} ${this.iconSize * 0.6}`)
+        .fillOpacity(0)
+        .stroke(this.iconColor)
+        .strokeWidth(this.lineWidth)
+        .strokeLineCap(LineCapStyle.Round)
+    }
+    .width(this.iconSize)
+    .height(this.iconSize)
+  }
+}
+
+/** 日历（跳转日期入口；圆角框 + 双耳 + 横线） */
+@Component
+export struct CalendarIcon {
+  iconSize: number = 18;
+  iconColor: string = '#6C7883';
+  lineWidth: number = 1.8;
+
+  build() {
+    Stack() {
+      Rect()
+        .width(this.iconSize * 0.78)
+        .height(this.iconSize * 0.72)
+        .radius(3)
+        .fillOpacity(0)
+        .stroke(this.iconColor)
+        .strokeWidth(this.lineWidth)
+        .translate({ y: this.iconSize * 0.1 })
+      Rect()
+        .width(this.iconSize * 0.78)
+        .height(this.lineWidth)
+        .fill(this.iconColor)
+        .translate({ y: this.iconSize * 0.26 })
+      Rect()
+        .width(this.lineWidth)
+        .height(this.iconSize * 0.2)
+        .radius(this.lineWidth / 2)
+        .fill(this.iconColor)
+        .translate({ x: -this.iconSize * 0.22, y: -this.iconSize * 0.38 })
+      Rect()
+        .width(this.lineWidth)
+        .height(this.iconSize * 0.2)
+        .radius(this.lineWidth / 2)
+        .fill(this.iconColor)
+        .translate({ x: this.iconSize * 0.22, y: -this.iconSize * 0.38 })
+    }
+    .width(this.iconSize)
+    .height(this.iconSize)
+  }
+}
